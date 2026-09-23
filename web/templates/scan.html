@@ -57,12 +57,22 @@
       </label>
 
       <div class="actions">
-        <button class="primary" id="go" onclick="start()">
+        <button class="primary" id="go" onclick="start(false)">
           <span>开始扫描</span>
+          <span class="arrow">→</span>
+        </button>
+        <button class="primary" id="go-fetch" onclick="start(true)">
+          <span>扫描并抓取磁力</span>
           <span class="arrow">→</span>
         </button>
         <span class="hint" id="hint"></span>
       </div>
+
+      <p class="note">
+        「扫描并抓取磁力」会在扫描完成后，对识别出的番号依次抓取
+        <strong>元数据 / 磁力 / 封面 / 内容截图</strong>。
+        抓取会联网访问 JavDB，每条约 3-6 秒；不做自动抓取，只在你点按钮时执行。
+      </p>
 
     </div>
   </div>
@@ -91,24 +101,34 @@
 <script>
 var timer = null;
 
-function start() {
+function start(enrich) {
   var path = document.getElementById('path').value.trim();
   var dry = document.getElementById('dry').checked;
   var hint = document.getElementById('hint');
 
   if (!path) { hint.textContent = '先填目录'; return; }
 
+  if (enrich && !confirm('扫描后会对识别出的番号抓取元数据/磁力/封面/截图。\n\n会联网访问 JavDB，每条约 3-6 秒。继续？')) {
+    return;
+  }
+
+  if (enrich && dry) {
+    hint.textContent = 'dry-run 模式不会抓取（不落库就没法抓）';
+    return;
+  }
+
   hint.textContent = '';
   fetch('/api/scan/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: path, dry_run: dry })
+    body: JSON.stringify({ path: path, dry_run: dry, enrich: enrich })
   })
   .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
   .then(function (res) {
     if (!res.j.ok) { hint.textContent = res.j.error || '启动失败'; return; }
     document.getElementById('progress-box').style.display = 'block';
     document.getElementById('go').disabled = true;
+    document.getElementById('go-fetch').disabled = true;
     poll();
   })
   .catch(function (e) { hint.textContent = '请求失败: ' + e; });
@@ -130,15 +150,24 @@ function poll() {
 
 function render(job) {
   document.getElementById('prog-path').textContent = job.path || '';
-  document.getElementById('prog-count').textContent =
-    job.total ? (job.done + ' / ' + job.total) : (job.done + ' 个文件');
 
-  var pct = job.total ? Math.round(job.done / job.total * 100) : (job.running ? 12 : 100);
+  var enriching = job.phase === 'enrich';
+  var done = enriching ? job.enrich_done : job.done;
+  var total = enriching ? job.enrich_total : job.total;
+
+  document.getElementById('prog-count').textContent =
+    total ? (done + ' / ' + total) : (job.done + ' 个文件');
+
+  var pct = total ? Math.round(done / total * 100) : (job.running ? 12 : 100);
   document.getElementById('bar').style.width = Math.min(100, pct) + '%';
 
   var stats = [];
+  if (enriching) { stats.push('抓取素材'); }
   stats.push('落库 ' + job.saved);
   if (job.dry_run) { stats.push('dry-run 模式'); }
+  if (job.unrecognized && job.unrecognized.length) {
+    stats.push('未识别 ' + job.unrecognized.length);
+  }
   if (job.error) { stats.push('错误: ' + job.error); }
   document.getElementById('prog-stats').textContent = stats.join('  ·  ');
 
@@ -148,7 +177,10 @@ function render(job) {
     var f = job.files[i];
     var nums = f.numbers.length
       ? f.numbers.map(function (n) {
-          return '<span class="tag">' + n.number + '<i>' + n.confidence + '</i></span>';
+          var extra = '';
+          if (n.magnet_count) { extra = '<i>+' + n.magnet_count + '磁力</i>'; }
+          else if (n.enriched) { extra = '<i>✓</i>'; }
+          return '<span class="tag">' + n.number + '<i>' + n.confidence + '</i>' + extra + '</span>';
         }).join('')
       : '<span class="tag miss">未识别</span>';
     html += '<div class="row">'

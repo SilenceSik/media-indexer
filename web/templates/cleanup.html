@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>空目录清理</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="aurora"></div>
+<div class="grain"></div>
+
+<div class="wrap">
+
+  <nav class="nav">
+    <span class="brand"><span class="dot"></span>媒体库</span>
+    <div class="nav-links">
+      <a href="/">全部</a>
+      <a href="/?has_magnet=1">有磁力</a>
+      <a href="/?missing_meta=1">缺元数据</a>
+      <a href="/scan">扫描</a>
+      <a href="/cleanup" class="on">空目录</a>
+    </div>
+    <form class="search" action="/search" method="get">
+      <input name="q" placeholder="搜索番号" autocomplete="off">
+      <button type="submit">搜索</button>
+    </form>
+  </nav>
+
+  <header class="hero" style="grid-template-columns:1fr; margin-bottom:3rem">
+    <div>
+      <h1>空目录清理</h1>
+      <p>找出指定目录下「整棵子树一个文件都没有」的目录。先扫后删，删除走回收站。</p>
+    </div>
+  </header>
+
+  <div class="shell" style="max-width:760px">
+    <div class="card" style="padding:1.75rem">
+
+      <label class="field">
+        <span>要扫描的目录（不给根目录）</span>
+        <input id="roots" placeholder="例如 X:\迅雷下载 或 X:\片" autocomplete="off" spellcheck="false">
+      </label>
+
+      <p class="note" style="margin:0 0 1.25rem; padding-top:0; border-top:0">
+        多个目录用 <code>|</code> 分隔。为避免误扫整盘，这里<strong>不会</strong>默认使用
+        <code>config.yaml</code> 的 scan_paths —— 那些通常是整个盘符，遍历代价极大，
+        还可能碰到有坏道的盘。
+      </p>
+
+      <div class="actions">
+        <button class="primary" onclick="scan()">
+          <span>扫描空目录</span>
+          <span class="arrow">→</span>
+        </button>
+        <button class="ghost" id="del-all" onclick="delAll()" disabled>全部送回收站</button>
+        <span class="hint" id="hint"></span>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="result" style="margin-top:2rem"></div>
+
+</div>
+
+<script>
+var found = [];
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+function scan() {
+  var hint = document.getElementById('hint');
+  var roots = document.getElementById('roots').value.trim();
+
+  if (!roots) { hint.textContent = '先填要扫描的目录'; return; }
+
+  hint.textContent = '扫描中…（目录树大时较慢）';
+
+  fetch('/api/empty-dirs?roots=' + encodeURIComponent(roots))
+    .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+    .then(function (res) {
+      var j = res.j;
+      hint.textContent = '';
+
+      if (!j.ok) {
+        hint.textContent = j.error || '扫描失败';
+        return;
+      }
+
+      found = j.dirs || [];
+
+      var box = document.getElementById('result');
+      document.getElementById('del-all').disabled = found.length === 0;
+
+      if (!found.length) {
+        box.innerHTML = '<div class="empty"><h3>没有空目录</h3>'
+          + '<p>扫描范围：' + (j.roots || []).map(esc).join(' · ') + '</p></div>';
+        return;
+      }
+
+      var html = '<p class="section-h">找到 ' + j.count + ' 个空目录'
+               + (j.count > found.length ? '（只显示前 ' + found.length + ' 个）' : '')
+               + '</p><div class="dirlist">';
+
+      found.forEach(function (d) {
+        html += '<div class="dirrow"><span class="fntxt">' + esc(d) + '</span></div>';
+      });
+
+      box.innerHTML = html + '</div>';
+    })
+    .catch(function (e) {
+      hint.textContent = '扫描失败：' + e;
+    });
+}
+
+function delAll() {
+  if (!found.length) return;
+  if (!confirm('把 ' + found.length + ' 个空目录送进回收站？\n\n（走回收站，可恢复）')) return;
+
+  document.getElementById('hint').textContent = '删除中…';
+
+  fetch('/api/empty-dirs/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dirs: found })
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    document.getElementById('hint').textContent =
+      '已送回收站 ' + j.deleted + ' 个' + (j.failed && j.failed.length ? '，失败 ' + j.failed.length : '');
+    document.getElementById('del-all').disabled = true;
+    scan();
+  });
+}
+</script>
+
+</body>
+</html>

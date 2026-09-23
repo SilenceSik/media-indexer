@@ -7,6 +7,9 @@
 # ── 核心（v2 主线 + 入口脚本）─────────────────────────────────
 PyYAML>=6.0
 mcp==2.0.0
+# Send2Trash : web/app.py -> services/file_service.py
+# 删除一律走回收站，绝不永久删除（README「没有磁力就不许删」配套约束）
+Send2Trash>=1.8
 
 # ── Web 控制台（web/app.py）───────────────────────────────────
 fastapi>=0.110

@@ -137,6 +137,8 @@ class Database:
 
             tags TEXT,
 
+            screenshots TEXT,
+
             updated_time REAL,
 
 
@@ -150,6 +152,39 @@ class Database:
         )
 
         self.conn.commit()
+
+        self.migrate()
+
+    def migrate(self):
+        """老库补列：metadata 缺 screenshots 时补上。
+
+        直接 ALTER 已存在该列的库会报 duplicate column name，先查 PRAGMA
+        （与 core/file_index.py 的迁移写法一致）。
+        """
+
+        columns = {
+
+            row[1]
+
+            for row in self.conn.execute(
+            """
+            PRAGMA table_info(metadata)
+            """
+            )
+
+        }
+
+        if "screenshots" not in columns:
+
+            self.conn.execute(
+            """
+            ALTER TABLE metadata
+
+            ADD COLUMN screenshots TEXT
+            """
+            )
+
+            self.conn.commit()
 
     def create_metadata(self):
 
@@ -455,6 +490,8 @@ class Database:
 
         cover,
 
+        cover_local,
+
         release_date,
 
         maker,
@@ -463,12 +500,14 @@ class Database:
 
         tags,
 
+        screenshots,
+
         updated_time
 
         )
 
 
-        VALUES(?,?,?,?,?,?,?,?)
+        VALUES(?,?,?,?,?,?,?,?,?,?)
 
         """,
 
@@ -480,6 +519,8 @@ class Database:
 
         data.get("cover"),
 
+        data.get("cover_local"),
+
         data.get("release_date"),
 
         data.get("maker"),
@@ -490,6 +531,10 @@ class Database:
 
         json.dumps(
             data.get("tags", [])
+        ),
+
+        json.dumps(
+            data.get("screenshots", [])
         ),
 
         time.time()

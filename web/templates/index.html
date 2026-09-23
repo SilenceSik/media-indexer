@@ -20,6 +20,7 @@
       <a href="/?has_magnet=1">有磁力</a>
       <a href="/?missing_meta=1">缺元数据</a>
       <a href="/scan">扫描</a>
+      <a href="/cleanup">空目录</a>
     </div>
     <form class="search" action="/search" method="get">
       <input name="q" placeholder="搜索番号" value="{{ q or '' }}" autocomplete="off">
@@ -30,15 +31,36 @@
   <header class="hero">
     <div>
       <h1>本地媒体库<br><em>{{ stats.titles }}</em> 部已编号</h1>
-      <p>扫描目录后自动识别番号并落库。只有拿到已验证磁力的条目才允许被清理。</p>
+      <p>扫描目录识别番号并落库。抓取元数据与磁力按需触发，不会自动联网。</p>
     </div>
     <div class="stats">
       <div class="stat"><b>{{ stats.files }}</b><span>文件</span></div>
       <div class="stat"><b>{{ stats.size_h }}</b><span>占用</span></div>
       <div class="stat"><b>{{ stats.magnets }}</b><span>已验证磁力</span></div>
       <div class="stat"><b>{{ stats.covered }}</b><span>有封面</span></div>
+      <div class="stat"><b>{{ stats.shots }}</b><span>有截图</span></div>
+      <div class="stat"><b>{{ stats.titles }}</b><span>部已编号</span></div>
     </div>
   </header>
+
+  <div class="actionbar">
+    <button class="primary" onclick="scanAndFetch()">
+      <span>扫描并抓取</span>
+      <span class="arrow">→</span>
+    </button>
+    <button class="ghost" onclick="enrichAll()">补抓缺元数据</button>
+    <button class="ghost" onclick="saveAllTorrents()">导出全部磁力</button>
+    <span class="hint" id="bar-hint"></span>
+  </div>
+
+  <div id="jobbar" style="display:none">
+    <div class="prog-head">
+      <span class="mono" id="job-phase"></span>
+      <span class="mono" id="job-count"></span>
+    </div>
+    <div class="bar"><div class="fill" id="job-fill"></div></div>
+    <div class="prog-stats" id="job-stats"></div>
+  </div>
 
   {% if q %}
   <p class="section-h">搜索 “{{ q }}” · {{ videos|length }} 条结果</p>
@@ -49,17 +71,30 @@
     {% for v in videos %}
     <div class="shell">
       <div class="card">
-        <div class="cover-box">
-          {% if v.cover_file %}
-          <img class="cover" src="/images/covers/{{ v.cover_file }}" alt="{{ v.number }}" loading="lazy">
-          {% else %}
-          <div class="cover-empty">NO COVER</div>
-          {% endif %}
-        </div>
+        <a class="cover-link" href="/detail/{{ v.number }}">
+          <div class="cover-box">
+            {% if v.cover_file %}
+            <img class="cover" src="/images/covers/{{ v.cover_file }}" alt="{{ v.number }}" loading="lazy">
+            {% else %}
+            <div class="cover-empty">NO COVER</div>
+            {% endif %}
+          </div>
+        </a>
         <div class="meta">
           <a class="num" href="/detail/{{ v.number }}">{{ v.number }}</a>
           {% if v.title %}<span class="ttl">{{ v.title }}</span>{% endif %}
           <span class="fn">{{ v.filename }}</span>
+
+          <div class="card-actions">
+            <button class="mini" title="打开所在文件夹" onclick="act('open','{{ v.number }}',this)">位置</button>
+            {% if v.deletable %}
+            <button class="mini danger" title="送回收站（该番号有已验证磁力）" onclick="act('delete','{{ v.number }}',this)">删除</button>
+            {% else %}
+            <button class="mini off" title="没有已验证磁力，按门控规则不可删除" disabled>删除</button>
+            {% endif %}
+            <button class="mini" title="把磁力存到项目目录" onclick="act('torrent','{{ v.number }}',this)">种子</button>
+            <button class="mini" title="抓取元数据/磁力/封面截图" onclick="act('enrich','{{ v.number }}',this)">抓取</button>
+          </div>
         </div>
       </div>
     </div>
@@ -72,7 +107,7 @@
         {% if q %}
         换个关键词试试，或返回 <a href="/" style="color:var(--accent)">全部</a>。
         {% else %}
-        先跑一次扫描：<code>python main.py "你的目录"</code>
+        点上面的「扫描并抓取」，或跑 <code>python main.py "你的目录"</code>
         {% endif %}
       </p>
     </div>
@@ -81,6 +116,116 @@
   </div>
 
 </div>
+
+<script>
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+function post(url, body) {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : '{}'
+  }).then(function (r) {
+    return r.json().then(function (j) { return { status: r.status, j: j }; });
+  });
+}
+
+// ── 卡片操作 ──────────────────────────────────────────────
+function act(kind, number, btn) {
+  var label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  post('/api/' + kind + '/' + encodeURIComponent(number)).then(function (res) {
+    var msg = res.j.message || res.j.error || (res.j.ok ? '完成' : '失败');
+
+    if (kind === 'delete' && res.j.ok) {
+      // 删成功就把卡片淡出，避免误以为还在
+      var shell = btn.closest('.shell');
+      if (shell) {
+        shell.style.transition = 'opacity .6s, transform .6s';
+        shell.style.opacity = '0.35';
+      }
+    }
+
+    btn.textContent = res.j.ok ? '✓' : '✗';
+    btn.title = msg;
+
+    if (!res.j.ok) {
+      alert(number + '：' + msg);
+    }
+
+    setTimeout(function () {
+      btn.textContent = label;
+      btn.disabled = false;
+    }, 1600);
+
+  }).catch(function (e) {
+    btn.textContent = label;
+    btn.disabled = false;
+    alert('请求失败：' + e);
+  });
+}
+
+// ── 扫描并抓取 ────────────────────────────────────────────
+function scanAndFetch() {
+  var path = prompt('要扫描的目录（留空则用 config.yaml 的 scan_paths）', '');
+  if (path === null) return;
+
+  post('/api/scan/start', { path: path, enrich: true }).then(function (res) {
+    if (!res.j.ok) { alert(res.j.error || '启动失败'); return; }
+    document.getElementById('jobbar').style.display = 'block';
+    poll();
+  });
+}
+
+function enrichAll() {
+  post('/api/enrich-all').then(function (res) {
+    if (!res.j.ok) { alert(res.j.error || '启动失败'); return; }
+    if (res.j.count === 0) { alert(res.j.message || '没有缺元数据的番号'); return; }
+    document.getElementById('jobbar').style.display = 'block';
+    poll();
+  });
+}
+
+function saveAllTorrents() {
+  post('/api/torrents/export-all').then(function (res) {
+    alert(res.j.message || JSON.stringify(res.j));
+  });
+}
+
+function poll() {
+  fetch('/api/scan/status').then(function (r) { return r.json(); }).then(function (job) {
+    document.getElementById('job-phase').textContent =
+      job.path + '  ·  ' + (job.phase === 'enrich' ? '抓取素材' : '扫描');
+
+    var done = job.phase === 'enrich' ? job.enrich_done : job.done;
+    var total = job.phase === 'enrich' ? job.enrich_total : job.total;
+
+    document.getElementById('job-count').textContent =
+      total ? (done + ' / ' + total) : (done + ' 个');
+
+    var pct = total ? Math.round(done / total * 100) : (job.running ? 10 : 100);
+    document.getElementById('job-fill').style.width = Math.min(100, pct) + '%';
+
+    var s = ['落库 ' + job.saved];
+    if (job.enrich) s.push('抓取中');
+    if (job.unrecognized && job.unrecognized.length) s.push('未识别 ' + job.unrecognized.length);
+    if (job.error) s.push('错误: ' + job.error);
+    document.getElementById('job-stats').textContent = s.join('  ·  ');
+
+    if (job.running) {
+      setTimeout(poll, 700);
+    } else {
+      setTimeout(function () { location.reload(); }, 900);
+    }
+  });
+}
+</script>
 
 </body>
 </html>

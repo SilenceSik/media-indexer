@@ -641,6 +641,17 @@ body {
 
 .hint { color: var(--danger); font-size: 0.85rem; }
 
+.note {
+  margin: 1.25rem 0 0;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--line);
+  color: var(--fg-faint);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+.note strong { color: var(--fg-dim); font-weight: 500; }
+
 .prog-head {
   display: flex;
   justify-content: space-between;
@@ -722,6 +733,170 @@ body {
   color: var(--fg-faint);
   border-color: var(--line);
   background: transparent;
+}
+
+/* ── 内容截图墙 ───────────────────────────────────────── */
+.shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 2.5rem;
+}
+
+.shot {
+  display: block;
+  padding: 0.3rem;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.018);
+  overflow: hidden;
+  transition: border-color 0.5s var(--ease), transform 0.5s var(--ease);
+}
+
+.shot:hover {
+  border-color: var(--line-hi);
+  transform: translateY(-2px);
+}
+
+.shot img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: calc(var(--r-lg) - 0.3rem);
+  transition: transform 0.7s var(--ease);
+}
+
+.shot:hover img { transform: scale(1.04); }
+
+/* 整张卡片可点：去掉链接默认样式，保留卡片外观 */
+a.card {
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  transition: box-shadow 0.6s var(--ease);
+}
+
+a.card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.shell:hover a.card .cover { transform: scale(1.035); }
+
+/* ── 卡片操作条 ───────────────────────────────────────── */
+.card-actions {
+  display: flex;
+  gap: 0.3rem;
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.mini {
+  flex: 1;
+  padding: 0.32rem 0.2rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.35s var(--ease), border-color 0.35s var(--ease),
+              background 0.35s var(--ease);
+}
+
+.mini:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--line-hi);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.mini:active:not(:disabled) { transform: scale(0.96); }
+
+.mini.danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: rgba(251, 113, 133, 0.4);
+}
+
+.mini.off {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* 卡片封面链接：铺满、去默认样式 */
+.cover-link {
+  display: block;
+  text-decoration: none;
+}
+
+/* ── 首页动作条 ───────────────────────────────────────── */
+.actionbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 2rem;
+}
+
+.ghost {
+  padding: 0.62rem 1.15rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: color 0.4s var(--ease), border-color 0.4s var(--ease),
+              background 0.4s var(--ease);
+}
+
+.ghost:hover {
+  color: var(--fg);
+  border-color: var(--line-hi);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.ghost:active { transform: scale(0.98); }
+
+#jobbar {
+  max-width: 760px;
+  margin-bottom: 2rem;
+  padding: 1.25rem 1.5rem;
+  border-radius: var(--r-xl);
+  border: 1px solid var(--line);
+  background: var(--card);
+}
+
+/* ── 空目录列表 ───────────────────────────────────────── */
+.dirlist {
+  display: grid;
+  gap: 0.15rem;
+  max-height: 34rem;
+  overflow-y: auto;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
+  padding: 0.6rem 0.9rem;
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.dirrow {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.dirrow:last-child { border-bottom: 0; }
+
+.fntxt {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--fg-dim);
+  word-break: break-all;
 }
 
 /* ── 动效 ─────────────────────────────────────────────── */

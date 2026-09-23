@@ -32,7 +32,9 @@
   <div class="detail">
 
     <div class="poster">
-      <div class="card">
+      <a class="card" href="{{ video.cover_file and '/images/covers/' + video.cover_file or '#' }}"
+         {% if video.cover_file %}target="_blank" rel="noopener"{% endif %}
+         title="点击看大图">
         <div class="cover-box">
           {% if video.cover_file %}
           <img class="cover" src="/images/covers/{{ video.cover_file }}" alt="{{ video.number }}">
@@ -40,7 +42,7 @@
           <div class="cover-empty">NO COVER</div>
           {% endif %}
         </div>
-      </div>
+      </a>
     </div>
 
     <div>
@@ -55,6 +57,17 @@
         {% if video.actresses %}<div><dt>演员</dt><dd>{{ video.actresses }}</dd></div>{% endif %}
         {% if video.tags %}<div><dt>标签</dt><dd>{{ video.tags }}</dd></div>{% endif %}
       </dl>
+
+      {% if video.screenshots %}
+      <p class="section-h">内容截图 · {{ video.screenshots|length }} 张</p>
+      <div class="shots">
+        {% for s in video.screenshots %}
+        <a class="shot" href="{{ s.url }}" target="_blank" rel="noopener">
+          <img src="{{ s.url }}" alt="{{ video.number }} 截图 {{ loop.index }}" loading="lazy">
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
 
       <p class="section-h">本地文件</p>
       <div class="magnet-list">

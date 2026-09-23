@@ -41,6 +41,11 @@ excluded_dir_segments: []
 #  - "tencent files"
 #  - "backup"
 
+# 种子保存目录：卡片上的「种子」按钮把该番号的磁力写成文本档放这里。
+# 磁力本身只是 hash，存成文件是留底（丢了得重找）。**追加**语义，
+# 程序默认用 storage/torrents。
+torrent_dir: "storage/torrents"
+
 # v2 主库（唯一主线）
 database: "storage/library_v2.db"
 
