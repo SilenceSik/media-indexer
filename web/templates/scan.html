@@ -90,6 +90,14 @@
 
         <div class="prog-stats" id="prog-stats"></div>
 
+        <div class="jobctl">
+          <button class="ghost" id="p-pause" onclick="ctl('pause')">暂停</button>
+          <button class="ghost" id="p-resume" onclick="ctl('resume')" style="display:none">继续</button>
+          <button class="ghost danger" id="p-stop" onclick="ctl('stop')">停止</button>
+        </div>
+
+        <div id="p-errors" class="joberr"></div>
+
         <div class="results" id="results"></div>
 
       </div>
@@ -143,8 +151,23 @@ function poll() {
         timer = setTimeout(poll, 400);
       } else {
         document.getElementById('go').disabled = false;
+        document.getElementById('go-fetch').disabled = false;
         if (timer) { clearTimeout(timer); timer = null; }
       }
+    });
+}
+
+function ctl(action) {
+  fetch('/api/scan/' + action, { method: 'POST' })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (!j.ok) { alert(j.message || '操作失败'); return; }
+      if (action === 'stop') {
+        document.getElementById('go').disabled = false;
+        document.getElementById('go-fetch').disabled = false;
+      }
+      if (timer) { clearTimeout(timer); timer = null; }
+      poll();
     });
 }
 
@@ -162,14 +185,39 @@ function render(job) {
   document.getElementById('bar').style.width = Math.min(100, pct) + '%';
 
   var stats = [];
-  if (enriching) { stats.push('抓取素材'); }
-  stats.push('落库 ' + job.saved);
+  if (enriching) {
+    stats.push('已抓 ' + (job.enriched || 0));
+    if (job.enrich_failed) { stats.push('失败 ' + job.enrich_failed); }
+    if (job.enrich_ambiguous) { stats.push('多版本 ' + job.enrich_ambiguous); }
+  } else {
+    stats.push('落库 ' + job.saved);
+  }
   if (job.dry_run) { stats.push('dry-run 模式'); }
+  if (job.paused) { stats.push('已暂停'); }
+  if (job.stopped) { stats.push('已停止'); }
   if (job.unrecognized && job.unrecognized.length) {
     stats.push('未识别 ' + job.unrecognized.length);
   }
   if (job.error) { stats.push('错误: ' + job.error); }
   document.getElementById('prog-stats').textContent = stats.join('  ·  ');
+
+  // 控制按钮
+  document.getElementById('p-pause').style.display = job.paused ? 'none' : '';
+  document.getElementById('p-resume').style.display = job.paused ? '' : 'none';
+  document.getElementById('p-stop').disabled = !job.running;
+
+  // 失败明细
+  var errBox = document.getElementById('p-errors');
+  if (job.enrich_errors && job.enrich_errors.length) {
+    var ehtml = '<div class="joberr-h">失败明细（前 ' + job.enrich_errors.length + ' 条）</div>';
+    job.enrich_errors.forEach(function (e) {
+      ehtml += '<div class="joberr-r"><span class="mono">' + esc(e.number)
+             + '</span> ' + esc(e.error) + '</div>';
+    });
+    errBox.innerHTML = ehtml;
+  } else {
+    errBox.innerHTML = '';
+  }
 
   var box = document.getElementById('results');
   var html = '';

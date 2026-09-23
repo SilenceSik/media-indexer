@@ -163,8 +163,40 @@ def test_enrich_downloads_cover_and_screenshots(env):
 
     row = db.conn.execute("SELECT cover_local, screenshots FROM metadata").fetchone()
 
+    # 存的是**相对路径**（带番号子目录），不是 basename ——
+    # 各番号的封面文件名完全一样，只存 basename 会全站撞名。
     assert row[0] == res["cover"]
-    assert len(json.loads(row[1])) == 2
+    assert "/" in row[0], f"应保留子目录层级，实际 {row[0]}"
+
+    shots_saved = json.loads(row[1])
+
+    assert len(shots_saved) == 2
+    assert all("/" in s for s in shots_saved), f"截图同样保留层级：{shots_saved}"
+
+
+def test_media_failure_keeps_magnets(env):
+    """素材（封面/截图）失败时，元数据与磁力仍要落库。
+
+    早前素材异常会写进 result["error"]，让整条看起来像失败 ——
+    磁力明明拿到了也白抓，用户只看到"抓取失败"。
+    """
+
+    db, covers, shots = env
+
+    class ExplodingClient(FakeClient):
+
+        def assets(self, number, kind="image"):
+            raise RuntimeError("assets 挂了")
+
+    svc = EnrichService(db, covers, shots, client=ExplodingClient(detail=DETAIL))
+
+    res = svc.enrich("ABP-171", want="all")
+
+    assert res["error"] is None, "素材失败不该让整条判为失败"
+    assert res["media_error"], "但要如实记录素材失败"
+    assert res["metadata"] is True
+    assert res["magnets"] == 3
+    assert len(db.magnets_for_title("ABP-171")) == 3
 
 
 def test_magnet_uri_from_hash():

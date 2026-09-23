@@ -252,19 +252,30 @@ def human_size(n):
 
 
 def cover_filename(cover_local):
-    """封面本地路径 -> 文件名。
+    """封面路径 -> /images/covers/ 下的相对 URL 路径。
 
-    必须在服务端算：模板里 `split('/')` 对 Windows 的反斜杠路径无效
-    （`storage\\images\\covers\\x.jpg`.split('/')[-1] 会返回整条路径 → 404）。
+    库里可能存两种形态（都要支持）：
+      * `ABP-041/image-002.jpg`  —— 服务抓取时写的新形态（带番号子目录）
+      * `ABP-041-image-002.jpg`  —— 早期扁平布局（番号做前缀）
+
+    绝不能只取 basename：落盘结构里各番号的封面**文件名完全一样**
+    （都叫 image-002.jpg），只取 basename 会让全站撞成同一张图。
     """
 
     if not cover_local:
 
         return None
 
-    return os.path.basename(
-        str(cover_local).replace("\\", "/")
-    )
+    text = str(cover_local).replace("\\", "/").lstrip("/")
+
+    # 防目录穿越：去掉 .. 段
+    parts = [p for p in text.split("/") if p and p != ".."]
+
+    if not parts:
+
+        return None
+
+    return "/".join(parts)
 
 
 def screenshot_files(raw):
@@ -308,11 +319,18 @@ def screenshot_files(raw):
 
             continue
 
-        name = os.path.basename(
-            str(item).replace("\\", "/")
-        )
+        text = str(item).replace("\\", "/").lstrip("/")
 
-        if name and name not in out:
+        # 与封面同理：保留番号子目录层级，只取 basename 会全站撞名
+        parts = [p for p in text.split("/") if p and p != ".."]
+
+        if not parts:
+
+            continue
+
+        name = "/".join(parts)
+
+        if name not in out:
 
             out.append(name)
 
@@ -685,8 +703,16 @@ def detail(
 # 设计取舍：不引入任务队列/Redis —— 这是本机单人工具，一次只跑一个扫描任务，
 # 用进程内 dict + 后台线程就够。进程重启丢任务状态是可接受的（扫描本身幂等，
 # 重新发起即可）。
+#
+# 暂停/停止用**协作式标志**，不用 Thread.kill（Python 没有安全的强杀）：
+# 后台循环在每个条目边界检查标志位，收到就干净收尾。
 
 _SCAN_LOCK = threading.Lock()
+
+# 协作式控制标志
+_SCAN_STOP = threading.Event()
+
+_SCAN_PAUSE = threading.Event()
 
 _SCAN_JOB = {
     "running": False,
@@ -709,6 +735,11 @@ _SCAN_JOB = {
 
 def _reset_job(path, dry_run, enrich=False):
 
+    # 新一轮任务：清掉上一轮的停止/暂停状态
+    _SCAN_STOP.clear()
+
+    _SCAN_PAUSE.clear()
+
     _SCAN_JOB.update(
         {
             "running": True,
@@ -722,12 +753,38 @@ def _reset_job(path, dry_run, enrich=False):
             "phase": "scan",
             "enrich_done": 0,
             "enrich_total": 0,
+            "enriched": 0,
+            "enrich_failed": 0,
+            "enrich_ambiguous": 0,
             "unrecognized": [],
+            "paused": False,
+            "stopped": False,
             "error": None,
             "started": time.time(),
             "finished": None,
         }
     )
+
+
+def _gate():
+    """在每个条目边界调用：处理暂停与停止。
+
+    返回 False 表示应该结束任务（收到停止）。
+    """
+
+    if _SCAN_STOP.is_set():
+
+        return False
+
+    while _SCAN_PAUSE.is_set():
+
+        if _SCAN_STOP.is_set():
+
+            return False
+
+        time.sleep(0.3)
+
+    return True
 
 
 def _run_scan(path, dry_run, enrich=False):
@@ -845,6 +902,14 @@ def _run_scan(path, dry_run, enrich=False):
 
             for i, num in enumerate(numbers, 1):
 
+                if not _gate():
+
+                    with _SCAN_LOCK:
+
+                        _SCAN_JOB["stopped"] = True
+
+                    break
+
                 try:
 
                     res = enricher.enrich(num, want="all")
@@ -856,6 +921,18 @@ def _run_scan(path, dry_run, enrich=False):
                 with _SCAN_LOCK:
 
                     _SCAN_JOB["enrich_done"] = i
+
+                    if res.get("error"):
+
+                        _SCAN_JOB["enrich_failed"] += 1
+
+                    else:
+
+                        _SCAN_JOB["enriched"] += 1
+
+                    if res.get("ambiguous_versions"):
+
+                        _SCAN_JOB["enrich_ambiguous"] += 1
 
                     for item in _SCAN_JOB["files"]:
 
@@ -945,6 +1022,57 @@ async def scan_start(request: Request):
     ).start()
 
     return {"ok": True}
+
+
+@app.post("/api/scan/stop")
+def scan_stop():
+    """请求停止当前任务（协作式：在下一个条目边界生效）。"""
+
+    with _SCAN_LOCK:
+
+        if not _SCAN_JOB["running"]:
+
+            return {"ok": False, "message": "当前没有在跑的任务"}
+
+        _SCAN_STOP.set()
+
+        _SCAN_PAUSE.clear()
+
+    return {"ok": True, "message": "已请求停止，会在当前条目跑完后停下"}
+
+
+@app.post("/api/scan/pause")
+def scan_pause():
+    """暂停当前任务。"""
+
+    with _SCAN_LOCK:
+
+        if not _SCAN_JOB["running"]:
+
+            return {"ok": False, "message": "当前没有在跑的任务"}
+
+        _SCAN_PAUSE.set()
+
+        _SCAN_JOB["paused"] = True
+
+    return {"ok": True, "message": "已暂停"}
+
+
+@app.post("/api/scan/resume")
+def scan_resume():
+    """继续被暂停的任务。"""
+
+    with _SCAN_LOCK:
+
+        if not _SCAN_JOB["running"]:
+
+            return {"ok": False, "message": "当前没有在跑的任务"}
+
+        _SCAN_PAUSE.clear()
+
+        _SCAN_JOB["paused"] = False
+
+    return {"ok": True, "message": "已继续"}
 
 
 @app.get("/api/scan/status")
@@ -1126,16 +1254,45 @@ def api_enrich_all(request: Request):
 
             for i, num in enumerate(numbers, 1):
 
+                if not _gate():
+
+                    with _SCAN_LOCK:
+
+                        _SCAN_JOB["stopped"] = True
+
+                    break
+
                 try:
 
-                    enricher.enrich(num, want="all")
+                    res = enricher.enrich(num, want="all")
 
-                except Exception:                               # noqa: BLE001
-                    pass
+                except Exception as exc:                        # noqa: BLE001
+
+                    # 不吞异常：早前这里 `pass`，导致抓取全失败时
+                    # 界面仍显示进度在涨、落库 0，用户看不出哪里错了。
+                    res = {"error": f"{type(exc).__name__}: {exc}"}
 
                 with _SCAN_LOCK:
 
                     _SCAN_JOB["enrich_done"] = i
+
+                    if res.get("error"):
+
+                        _SCAN_JOB["enrich_failed"] += 1
+
+                        errs = _SCAN_JOB.setdefault("enrich_errors", [])
+
+                        if len(errs) < 40:
+
+                            errs.append({"number": num, "error": res["error"]})
+
+                    else:
+
+                        _SCAN_JOB["enriched"] += 1
+
+                    if res.get("ambiguous_versions"):
+
+                        _SCAN_JOB["enrich_ambiguous"] += 1
 
         except Exception as exc:                                # noqa: BLE001
 

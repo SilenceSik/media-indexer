@@ -121,16 +121,16 @@ def test_save_metadata_without_screenshots(tmp_path):
 # ─────────────────────────── screenshot_files
 
 def test_screenshot_files_from_json_array():
-    raw = json.dumps([r"covers\ABP-171-image-001.jpg", "x/ABP-171-image-002.jpg"])
+    raw = json.dumps([r"covers\ABP-171\ABP-171-image-001.jpg", "x/ABP-171-image-002.jpg"])
 
     assert web_app.screenshot_files(raw) == [
-        "ABP-171-image-001.jpg",
-        "ABP-171-image-002.jpg",
+        "covers/ABP-171/ABP-171-image-001.jpg",
+        "x/ABP-171-image-002.jpg",
     ]
 
 
 def test_screenshot_files_single_string():
-    assert web_app.screenshot_files(r"a\b\c.jpg") == ["c.jpg"]
+    assert web_app.screenshot_files(r"a\b\c.jpg") == ["a/b/c.jpg"]
 
 
 def test_screenshot_files_empty_and_broken():
@@ -142,7 +142,7 @@ def test_screenshot_files_empty_and_broken():
 def test_screenshot_files_dedupes():
     raw = json.dumps(["a/x.jpg", "b/x.jpg"])
 
-    assert web_app.screenshot_files(raw) == ["x.jpg"]
+    assert web_app.screenshot_files(raw) == ["a/x.jpg", "b/x.jpg"]
 
 
 # ─────────────────────────── screenshot_url

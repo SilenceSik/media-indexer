@@ -45,6 +45,7 @@ class EnrichService:
             "magnets": 0,
             "cover": None,
             "screenshots": 0,
+            "ambiguous_versions": None,
             "error": None,
         }
 
@@ -56,7 +57,14 @@ class EnrichService:
 
             return result
 
-        # ── 素材：封面 + 截图（want=all 才抓，失败不影响主记录）──
+        # 番号对应多个影片 ID 时，适配器会把各版本磁力合并后返回
+        result["ambiguous_versions"] = detail.get("ambiguous_versions")
+
+        # ── 素材：封面 + 截图（want=all 才抓）──
+        #
+        # 独立 try：素材失败不能让整条记录变成「查不到」。
+        # 早前把素材下载放在 detail 的 try 里，素材一报错整条就夭折，
+        # 磁力明明拿到了也落不了库。
         cover_local = None
         screenshot_names = []
 
@@ -68,7 +76,8 @@ class EnrichService:
 
             except Exception as exc:                            # noqa: BLE001
 
-                result["error"] = f"素材下载失败：{exc}"
+                # 素材失败不覆盖已算作成功的元数据/磁力，只记一条提示
+                result["media_error"] = f"{type(exc).__name__}: {exc}"
 
         # ── 元数据 ──
         acts = detail.get("actors") or []
@@ -221,7 +230,7 @@ class EnrichService:
                     reverse=True,
                 )
 
-                cover_name = os.path.basename(got[0])
+                cover_name = self._relpath(got[0], self.covers_dir)
 
         elif cover_lines:
 
@@ -234,7 +243,7 @@ class EnrichService:
                     reverse=True,
                 )
 
-                cover_name = os.path.basename(files[0])
+                cover_name = self._relpath(files[0], self.covers_dir)
 
         shot_dir = os.path.join(self.screenshots_dir, number)
 
@@ -242,13 +251,32 @@ class EnrichService:
 
             got = self.client.download_assets(shot_lines, shot_dir)
 
-            shot_names = [os.path.basename(p) for p in got]
+            shot_names = [self._relpath(p, self.screenshots_dir) for p in got]
 
         elif shot_lines:
 
-            shot_names = [os.path.basename(p) for p in self._files(shot_dir)]
+            shot_names = [
+                self._relpath(p, self.screenshots_dir)
+                for p in self._files(shot_dir)
+            ]
 
         return cover_name, shot_names
+
+    @staticmethod
+    def _relpath(path, root):
+        """落盘路径 -> 相对根目录的路径（正斜杠）。
+
+        **必须存相对路径而不是 basename**：落盘结构是
+        `<root>/<番号>/image-002.jpg`，各番号的文件名完全一样
+        （都叫 image-002.jpg）。只存 basename 会让全站封面撞成同一个名字。
+        """
+
+        rel = os.path.relpath(
+            os.path.abspath(path),
+            os.path.abspath(root),
+        )
+
+        return rel.replace("\\", "/")
 
     @staticmethod
     def _files(directory):

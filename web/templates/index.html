@@ -60,6 +60,12 @@
     </div>
     <div class="bar"><div class="fill" id="job-fill"></div></div>
     <div class="prog-stats" id="job-stats"></div>
+    <div class="jobctl">
+      <button class="ghost" id="btn-pause" onclick="ctl('pause')">暂停</button>
+      <button class="ghost" id="btn-resume" onclick="ctl('resume')" style="display:none">继续</button>
+      <button class="ghost danger" id="btn-stop" onclick="ctl('stop')">停止</button>
+    </div>
+    <div id="job-errors" class="joberr"></div>
   </div>
 
   {% if q %}
@@ -200,11 +206,14 @@ function saveAllTorrents() {
 
 function poll() {
   fetch('/api/scan/status').then(function (r) { return r.json(); }).then(function (job) {
-    document.getElementById('job-phase').textContent =
-      job.path + '  ·  ' + (job.phase === 'enrich' ? '抓取素材' : '扫描');
+    var enriching = job.phase === 'enrich';
 
-    var done = job.phase === 'enrich' ? job.enrich_done : job.done;
-    var total = job.phase === 'enrich' ? job.enrich_total : job.total;
+    document.getElementById('job-phase').textContent =
+      job.path + '  ·  ' + (enriching ? '抓取素材' : '扫描')
+      + (job.paused ? '  ·  已暂停' : '');
+
+    var done = enriching ? job.enrich_done : job.done;
+    var total = enriching ? job.enrich_total : job.total;
 
     document.getElementById('job-count').textContent =
       total ? (done + ' / ' + total) : (done + ' 个');
@@ -212,17 +221,49 @@ function poll() {
     var pct = total ? Math.round(done / total * 100) : (job.running ? 10 : 100);
     document.getElementById('job-fill').style.width = Math.min(100, pct) + '%';
 
-    var s = ['落库 ' + job.saved];
-    if (job.enrich) s.push('抓取中');
+    var s = [];
+    if (enriching) {
+      s.push('已抓 ' + (job.enriched || 0));
+      if (job.enrich_failed) s.push('失败 ' + job.enrich_failed);
+      if (job.enrich_ambiguous) s.push('多版本 ' + job.enrich_ambiguous);
+    } else {
+      s.push('落库 ' + job.saved);
+    }
     if (job.unrecognized && job.unrecognized.length) s.push('未识别 ' + job.unrecognized.length);
+    if (job.stopped) s.push('已停止');
     if (job.error) s.push('错误: ' + job.error);
     document.getElementById('job-stats').textContent = s.join('  ·  ');
+
+    // 控制按钮状态
+    document.getElementById('btn-pause').style.display = job.paused ? 'none' : '';
+    document.getElementById('btn-resume').style.display = job.paused ? '' : 'none';
+    document.getElementById('btn-stop').disabled = !job.running;
+
+    // 失败明细（抓取失败时用户要能看出哪里错了）
+    var errBox = document.getElementById('job-errors');
+    if (job.enrich_errors && job.enrich_errors.length) {
+      var ehtml = '<div class="joberr-h">失败明细（前 ' + job.enrich_errors.length + ' 条）</div>';
+      job.enrich_errors.forEach(function (e) {
+        ehtml += '<div class="joberr-r"><span class="mono">' + esc(e.number)
+               + '</span> ' + esc(e.error) + '</div>';
+      });
+      errBox.innerHTML = ehtml;
+    } else {
+      errBox.innerHTML = '';
+    }
 
     if (job.running) {
       setTimeout(poll, 700);
     } else {
       setTimeout(function () { location.reload(); }, 900);
     }
+  });
+}
+
+function ctl(action) {
+  post('/api/scan/' + action).then(function (res) {
+    if (!res.j.ok) { alert(res.j.message || '操作失败'); return; }
+    if (action !== 'stop') setTimeout(poll, 300);
   });
 }
 </script>

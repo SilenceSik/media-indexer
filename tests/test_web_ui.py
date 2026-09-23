@@ -18,23 +18,23 @@ from web import app as web_app                               # noqa: E402
 # ─────────────────────────── cover_filename
 
 def test_cover_filename_handles_windows_backslash():
-    """Windows 反斜杠路径必须能取到文件名。
+    """Windows 反斜杠路径必须能出图。
 
     模板里 `split('/')` 对反斜杠无效会返回整条路径 → 封面 404。
     这就是把它挪到服务端的原因。
     """
 
     got = web_app.cover_filename(
-        r"storage\images\covers\ABP-171-image-002.jpg"
+        r"ABP-041\ABP-171-image-002.jpg"
     )
 
-    assert got == "ABP-171-image-002.jpg"
+    assert got == "ABP-041/ABP-171-image-002.jpg"
 
 
 def test_cover_filename_handles_forward_slash():
-    got = web_app.cover_filename("storage/images/covers/x.jpg")
+    got = web_app.cover_filename("ABP-041/x.jpg")
 
-    assert got == "x.jpg"
+    assert got == "ABP-041/x.jpg"
 
 
 def test_cover_filename_none_and_empty():

@@ -873,6 +873,47 @@ a.card:focus-visible {
   background: var(--card);
 }
 
+.jobctl {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.jobctl .ghost { font-size: 0.8rem; padding: 0.45rem 1rem; }
+
+.jobctl .ghost:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.jobctl .ghost.danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: rgba(251, 113, 133, 0.4);
+}
+
+.joberr {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.joberr-h {
+  font-size: 0.75rem;
+  color: var(--danger);
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.04em;
+}
+
+.joberr-r {
+  font-size: 0.74rem;
+  color: var(--fg-faint);
+  padding: 0.2rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+}
+
+.joberr-r .mono { color: var(--fg-dim); margin-right: 0.5rem; }
+
 /* ── 空目录列表 ───────────────────────────────────────── */
 .dirlist {
   display: grid;
