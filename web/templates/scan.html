@@ -56,6 +56,41 @@
         <span>只预览不落库（dry-run）</span>
       </label>
 
+      <div class="conf-box">
+        <div class="conf-head">
+          <span>落库置信度门槛</span>
+          <span class="conf-val mono" id="conf-label">0 - 100（全收）</span>
+        </div>
+
+        <div class="conf-sliders">
+          <label class="slider-row">
+            <span class="slider-name">最低</span>
+            <input type="range" id="min-conf" min="0" max="100" value="0" step="5"
+                   oninput="syncConf()">
+            <span class="slider-num mono" id="min-val">0</span>
+          </label>
+          <label class="slider-row">
+            <span class="slider-name">最高</span>
+            <input type="range" id="max-conf" min="0" max="100" value="100" step="5"
+                   oninput="syncConf()">
+            <span class="slider-num mono" id="max-val">100</span>
+          </label>
+        </div>
+
+        <div class="conf-presets">
+          <button class="chip" type="button" onclick="preset(0,100)">全收</button>
+          <button class="chip" type="button" onclick="preset(90,100)">只收可信档 ≥90</button>
+          <button class="chip" type="button" onclick="preset(70,70)">只看待确认 70</button>
+          <button class="chip" type="button" onclick="preset(60,69)">低分候选 60-69</button>
+        </div>
+
+        <p class="note" style="margin:0.9rem 0 0; padding-top:0; border-top:0">
+          识别规则是启发式的：未收录厂牌只有 70 分、数字前缀 60 分。
+          默认全收会把这类猜测也写进库（例如 <code>..._amq13.mp4</code>
+          会被当成 <code>AMQ-13</code>）。设 <strong>90</strong> 可只留可信档。
+        </p>
+      </div>
+
       <div class="actions">
         <button class="primary" id="go" onclick="start(false)">
           <span>开始扫描</span>
@@ -109,10 +144,43 @@
 <script>
 var timer = null;
 
+function syncConf() {
+  var lo = parseInt(document.getElementById('min-conf').value, 10);
+  var hi = parseInt(document.getElementById('max-conf').value, 10);
+
+  // 不让最低超过最高：拖动任一端时把另一端顶过去
+  if (lo > hi) {
+    if (document.activeElement.id === 'min-conf') {
+      document.getElementById('max-conf').value = lo;
+      hi = lo;
+    } else {
+      document.getElementById('min-conf').value = hi;
+      lo = hi;
+    }
+  }
+
+  document.getElementById('min-val').textContent = lo;
+  document.getElementById('max-val').textContent = hi;
+
+  var label = lo + ' - ' + hi;
+  if (lo === 0 && hi === 100) { label += '（全收）'; }
+  else if (lo === 90 && hi === 100) { label += '（只收可信档）'; }
+  document.getElementById('conf-label').textContent = label;
+}
+
+function preset(lo, hi) {
+  document.getElementById('min-conf').value = lo;
+  document.getElementById('max-conf').value = hi;
+  syncConf();
+}
+
 function start(enrich) {
   var path = document.getElementById('path').value.trim();
   var dry = document.getElementById('dry').checked;
   var hint = document.getElementById('hint');
+
+  var minConf = parseInt(document.getElementById('min-conf').value, 10);
+  var maxConf = parseInt(document.getElementById('max-conf').value, 10);
 
   if (!path) { hint.textContent = '先填目录'; return; }
 
@@ -129,7 +197,10 @@ function start(enrich) {
   fetch('/api/scan/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: path, dry_run: dry, enrich: enrich })
+    body: JSON.stringify({
+      path: path, dry_run: dry, enrich: enrich,
+      min_conf: minConf, max_conf: maxConf
+    })
   })
   .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
   .then(function (res) {
@@ -191,6 +262,10 @@ function render(job) {
     if (job.enrich_ambiguous) { stats.push('多版本 ' + job.enrich_ambiguous); }
   } else {
     stats.push('落库 ' + job.saved);
+    if (job.skipped_count) {
+      stats.push('门槛挡下 ' + job.skipped_count
+                 + '（' + job.min_conf + '-' + job.max_conf + '）');
+    }
   }
   if (job.dry_run) { stats.push('dry-run 模式'); }
   if (job.paused) { stats.push('已暂停'); }
@@ -206,18 +281,28 @@ function render(job) {
   document.getElementById('p-resume').style.display = job.paused ? '' : 'none';
   document.getElementById('p-stop').disabled = !job.running;
 
-  // 失败明细
+  // 失败明细 + 门槛挡下的明细
   var errBox = document.getElementById('p-errors');
+  var ehtml = '';
+
   if (job.enrich_errors && job.enrich_errors.length) {
-    var ehtml = '<div class="joberr-h">失败明细（前 ' + job.enrich_errors.length + ' 条）</div>';
+    ehtml += '<div class="joberr-h">抓取失败（前 ' + job.enrich_errors.length + ' 条）</div>';
     job.enrich_errors.forEach(function (e) {
       ehtml += '<div class="joberr-r"><span class="mono">' + esc(e.number)
              + '</span> ' + esc(e.error) + '</div>';
     });
-    errBox.innerHTML = ehtml;
-  } else {
-    errBox.innerHTML = '';
   }
+
+  if (job.skipped_samples && job.skipped_samples.length) {
+    ehtml += '<div class="joberr-h skip">置信度门槛挡下（前 '
+           + job.skipped_samples.length + ' 条）</div>';
+    job.skipped_samples.forEach(function (e) {
+      ehtml += '<div class="joberr-r"><span class="mono">' + esc(e.number)
+             + '</span> ' + e.confidence + ' 分 · ' + esc(e.file) + '</div>';
+    });
+  }
+
+  errBox.innerHTML = ehtml;
 
   var box = document.getElementById('results');
   var html = '';

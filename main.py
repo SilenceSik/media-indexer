@@ -94,6 +94,24 @@ def parse_args(argv=None):
         help="真·干跑：解析并显示结果，但不写库、不推进增量索引",
     )
 
+    parser.add_argument(
+        "--min-conf",
+        type=int,
+        default=0,
+        metavar="N",
+        help="落库的最低置信度（0-100，默认 0 = 全收）。"
+             "识别规则是启发式的，设 90 可只收可信档；"
+             "设 70 可专门捞出待人工确认的猜测",
+    )
+
+    parser.add_argument(
+        "--max-conf",
+        type=int,
+        default=100,
+        metavar="N",
+        help="落库的最高置信度（0-100，默认 100 = 不设上限）",
+    )
+
     return parser.parse_args(argv)
 
 
@@ -163,6 +181,11 @@ def main(argv=None):
 
     total_files = 0
     total_saved = 0
+    total_skipped = 0
+
+    if args.min_conf or args.max_conf != 100:
+
+        print(f"落库置信度门槛：{args.min_conf} - {args.max_conf}")
 
     for path in targets:
 
@@ -176,7 +199,9 @@ def main(argv=None):
 
         result = service.scan(
             path,
-            persist=not args.dry_run
+            persist=not args.dry_run,
+            min_conf=args.min_conf,
+            max_conf=args.max_conf,
         )
 
         rows = result["data"]
@@ -185,8 +210,13 @@ def main(argv=None):
             1 for row in rows if row["persisted"]
         )
 
+        skipped = sum(
+            1 for row in rows if row.get("skipped")
+        )
+
         total_files += len(rows)
         total_saved += persisted
+        total_skipped += skipped
 
         if args.dry_run:
 
@@ -207,7 +237,22 @@ def main(argv=None):
 
         else:
 
-            print(f"  文件 {len(rows)} / 落库 {persisted}")
+            line = f"  文件 {len(rows)} / 落库 {persisted}"
+
+            if skipped:
+
+                line += f" / 门槛挡下 {skipped}"
+
+            print(line)
+
+            for row in rows:
+
+                if row.get("skipped"):
+
+                    sk = row["skipped"]
+
+                    print(f"    [跳过] {os.path.basename(row['file'])}"
+                          f"  {sk['number']} ({sk['confidence']})")
 
     if args.dry_run:
 
@@ -215,7 +260,13 @@ def main(argv=None):
 
     else:
 
-        print(f"\n完成：共 {total_files} 个文件，落库 {total_saved} 条")
+        tail = f"，落库 {total_saved} 条"
+
+        if total_skipped:
+
+            tail += f"，门槛挡下 {total_skipped} 条"
+
+        print(f"\n完成：共 {total_files} 个文件{tail}")
 
     return 0
 

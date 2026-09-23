@@ -34,6 +34,23 @@ class Database:
 
         self.conn.row_factory = sqlite3.Row
 
+        # WAL：读写并行。默认的 delete 模式是**读写互斥** —— 抓取线程每写一条
+        # 就独占锁，Web 端每次刷新都要等它，实测表现为"抓取时页面非常卡"。
+        # WAL 下读不阻塞写、写不阻塞读，这正是本工具的使用形态（后台抓取 +
+        # 前台浏览）。busy_timeout 兜住偶发竞争，避免直接抛 database is locked。
+        try:
+
+            self.conn.execute("PRAGMA journal_mode=WAL")
+
+            self.conn.execute("PRAGMA busy_timeout=10000")
+
+            self.conn.execute("PRAGMA synchronous=NORMAL")
+
+        except sqlite3.DatabaseError:
+
+            # 只读文件系统等极端情况下不能让构造失败，退回默认行为
+            pass
+
         self.create()
 
     def create(self):

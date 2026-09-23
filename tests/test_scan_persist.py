@@ -1,6 +1,6 @@
 """P0-1 主干链路 —— 「扫描 → 解析 → 落库」验收测试
 
-三条断言：
+对应卡 t_e68dcbd6 的三条断言：
   ① 扫描后 titles > 0
   ② media_files 行数 = 识别出番号的文件数
   ③ persist=False 时两表均不增
@@ -102,7 +102,8 @@ def test_scan_persists_titles_and_files(tmp_path, library_db):
     assert len(rows) == 3
 
     for row in rows:
-        assert set(row) == {"file", "numbers", "persisted"}
+        # skipped 是置信度门槛挡下的记录（默认全收时为 None）
+        assert set(row) == {"file", "numbers", "persisted", "skipped"}
         assert isinstance(row["persisted"], bool)
 
     by_name = {

@@ -211,17 +211,33 @@ def build_enrich_service():
 
 
 def query(sql, args=()):
-    """只读查询。库不存在时返回空结果而不是 500（首次使用还没扫过）。"""
+    """只读查询。库不存在时返回空结果而不是 500（首次使用还没扫过）。
+
+    连接参数与 core.database_v2 对齐：WAL + busy_timeout。
+    不设的话，后台抓取在写、前台在读时会互相排队 —— 实测表现为
+    "点补抓之后页面非常卡"（默认 delete 模式读写互斥）。
+    """
 
     if not DB_PATH or not os.path.exists(DB_PATH):
 
         return []
 
     conn = sqlite3.connect(
-        DB_PATH
+        DB_PATH,
+        timeout=10.0,
     )
 
     conn.row_factory = sqlite3.Row
+
+    try:
+
+        conn.execute("PRAGMA journal_mode=WAL")
+
+        conn.execute("PRAGMA busy_timeout=10000")
+
+    except sqlite3.DatabaseError:
+
+        pass
 
     try:
 
@@ -733,7 +749,7 @@ _SCAN_JOB = {
 }
 
 
-def _reset_job(path, dry_run, enrich=False):
+def _reset_job(path, dry_run, enrich=False, min_conf=0, max_conf=100):
 
     # 新一轮任务：清掉上一轮的停止/暂停状态
     _SCAN_STOP.clear()
@@ -756,6 +772,10 @@ def _reset_job(path, dry_run, enrich=False):
             "enriched": 0,
             "enrich_failed": 0,
             "enrich_ambiguous": 0,
+            "min_conf": min_conf,
+            "max_conf": max_conf,
+            "skipped_count": 0,
+            "skipped_samples": [],
             "unrecognized": [],
             "paused": False,
             "stopped": False,
@@ -787,7 +807,7 @@ def _gate():
     return True
 
 
-def _run_scan(path, dry_run, enrich=False):
+def _run_scan(path, dry_run, enrich=False, min_conf=0, max_conf=100):
     """后台线程体：扫描；enrich=True 时紧接着抓元数据/磁力/封面截图。"""
 
     try:
@@ -837,6 +857,8 @@ def _run_scan(path, dry_run, enrich=False):
         result = service.scan(
             path,
             persist=not dry_run,
+            min_conf=min_conf,
+            max_conf=max_conf,
         )
 
         rows = result["data"]
@@ -858,12 +880,29 @@ def _run_scan(path, dry_run, enrich=False):
                             for n in row["numbers"][:3]
                         ],
                         "persisted": row["persisted"],
+                        "skipped": row.get("skipped"),
                     }
                 )
 
                 if row["persisted"]:
 
                     _SCAN_JOB["saved"] += 1
+
+                elif row.get("skipped"):
+
+                    # 被可信度门槛挡下的，单独计数 + 展示，否则用户只看到
+                    # "扫到了但没进库"，不知道是门槛挡的还是没识别出来
+                    _SCAN_JOB["skipped_count"] += 1
+
+                    sk = _SCAN_JOB.setdefault("skipped_samples", [])
+
+                    if len(sk) < 50:
+
+                        sk.append({
+                            "file": os.path.basename(row["file"]),
+                            "number": row["skipped"]["number"],
+                            "confidence": row["skipped"]["confidence"],
+                        })
 
         # ── 抓取阶段（仅在显式要求时执行；绝不自动触发）──
         if enrich and not dry_run:
@@ -993,6 +1032,27 @@ async def scan_start(request: Request):
 
     enrich = bool(payload.get("enrich"))
 
+    try:
+
+        min_conf = int(payload.get("min_conf", 0))
+
+        max_conf = int(payload.get("max_conf", 100))
+
+    except (TypeError, ValueError):
+
+        return JSONResponse(
+            {"ok": False, "error": "置信度门槛必须是数字"},
+            status_code=400,
+        )
+
+    min_conf = max(0, min(100, min_conf))
+
+    max_conf = max(0, min(100, max_conf))
+
+    if min_conf > max_conf:
+
+        min_conf, max_conf = max_conf, min_conf
+
     if not path:
 
         return JSONResponse(
@@ -1016,11 +1076,11 @@ async def scan_start(request: Request):
                 status_code=409,
             )
 
-        _reset_job(path, dry_run, enrich)
+        _reset_job(path, dry_run, enrich, min_conf, max_conf)
 
     threading.Thread(
         target=_run_scan,
-        args=(path, dry_run, enrich),
+        args=(path, dry_run, enrich, min_conf, max_conf),
         daemon=True,
     ).start()
 
