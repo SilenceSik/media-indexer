@@ -20,7 +20,7 @@
 
 本地媒体文件索引管理工具：扫描本地视频 → 文件名清洗 → 番号识别 → 建库 → 拉取元数据 → 整理归档。
 
-最终形态是一套**常驻后台服务**，通过 MCP 暴露给 Agent 客户端，而不是一堆手动跑的脚本。
+最终形态是一套**常驻后台服务**，通过 MCP 暴露给 Agent（供思思调用），而不是一堆手动跑的脚本。
 
 ---
 
@@ -224,6 +224,14 @@ WHERE id NOT IN (SELECT title_id FROM metadata)
 
 **修法：** 明确 v2 为主线，把入口层（main / service / MCP）全部切到 `services/*` + `library_v2.db`；v1 代码保留为只读迁移源，标记 deprecated。
 
+**✅ 已修（2026-09-23）**
+
+- `main.py` 已切到 `services/scan_service.py` + `core/database_v2.py`，写 `library_v2.db`
+- `web/app.py` 已切到 v2 库（模板变量名仍叫 `videos`，但数据源是 `titles`/`media_files`/`metadata`，
+  关联走 `titles.id`，不用 `metadata.number`）
+- `config.yaml` 的 `database` 已指向 `storage/library_v2.db`，`database_v1_legacy` 单列 v1 库
+- 上表「谁在用 / 只有 tests 引用」描述的是**修复前**的状态，保留作为问题记录
+
 ---
 
 #### P1-2　番号识别覆盖率不足
@@ -353,12 +361,17 @@ hash.py     / filehash.py           javdb.py  / javdb_adapter.py
 质检必须能看到刚落的数据、扫后删文件必须被质检报出）。已做 mutation 验证：
 把质检指向另一份库（复现 P0-2 形态）→ 两条测试立刻红，恢复后 188 passed。
 
-**P2-6　AV 匹配未限定格式（`video_extensions` 是死配置）** ✅ 已修（2026-09-23）
+**P2-6　番号匹配未限定格式（`video_extensions` 是死配置）** ✅ 已修（2026-09-23）
 
 **现象：** `config.yaml` 里写着 `video_extensions`（.mp4/.mkv/.avi/.mov/.wmv/.ts），但
 `core/scanner_v2.py` 的 `os.walk` **从不过滤扩展名** —— 这个配置项从来没有被任何代码引用过。
-结果：语料里 15,593 个 `.webm` 片段（录屏 / OF / 3D 动画）全部进解析流程，
-既拖慢扫描，又制造大量低分假阳性。
+结果：语料里 15,593 个 `.webm` 全部进解析流程，既拖慢扫描，又制造大量低分假阳性。
+
+> **定性更正（2026-09-23 二轮实测）：** 这里原先写 `.webm` 是「录屏 / OF / 3D 动画」，
+> 经全量语料复核**不准确**。真实构成是 `X:\ga\` **成人游戏资源树**
+> （Ren'Py 引擎的 `game\images`、`game\movie`、`www\movies` 等），是游戏内视频段与
+> 引擎缓存名，其余为零星的 Photoshop 工具提示视频与 tumblr 片段。共同点只有一个：
+> **它们在可信档的产出是 0**。
 
 **根因：** 扫描器只做了「变化检测」，从没有过「这是什么类型的文件」这一层。
 
@@ -373,7 +386,7 @@ hash.py     / filehash.py           javdb.py  / javdb_adapter.py
 **为什么是追加语义而不是覆盖：** 配置是给人手写的，覆盖语义下少写一个格式会
 **静默漏扫整类文件**；追加语义下最坏只是多扫。方向是安全的。
 
-**实测依据（26,230 条真实文件名快照）：**
+**实测依据（26,230 条真实语料，`真实文件名快照`）：**
 
 | 扩展名 | 文件数 | 可信档命中（conf≥90） | 产出率 |
 |---|---|---|---|
@@ -390,9 +403,9 @@ hash.py     / filehash.py           javdb.py  / javdb_adapter.py
 
 **验证：** 出厂默认白名单保留 10,495/26,230（40.0%），过滤掉 60% 的文件，
 **被过滤掉的文件里可信档命中 = 0 个**（零静默漏扫）。
-脚本：一次性验证脚本，未随库发布。
+脚本：`离线验证脚本`。
 
-**已做的 mutation 验证**（5/5 全红、还原复绿）：
+**已做的 mutation 验证**（`mutation 验证脚本`，5/5 全红、还原复绿）：
 ① 扫描不过滤扩展名 ② 追加语义改成覆盖语义 ③ 把 `.webm` 塞回默认名单
 ④ `ScanService` 丢掉 `extensions` 透传 ⑤ 删除门控放松到 `verified>=0`。
 
@@ -438,9 +451,6 @@ $ python -m pytest tests/ -q
 220 passed in 21.64s
 ```
 
-> 注：以上是**有真实语料样本**时的结果。全新 clone 未提供 `samples/` 时，
-> 依赖样本的 2 项会 skip，结果为 `218 passed, 2 skipped`——两者都是绿的。
-
 文件分布（`--collect-only` 实测）：
 
 | 文件 | 条数 |
@@ -476,7 +486,7 @@ $ python -m pytest tests/ -q
 ## 7. 推进顺序（已全部执行完毕）
 
 **第一步（架构决策）** ✅
-1. 确认 **v2 为唯一主线**，v1 冻结为只读迁移源
+1. 确认 **v2 为唯一主线**，v1 冻结为只读迁移源 → 设计决策记录 D1
 2. P0-1 落库语义 → 采用 UPSERT 重链方案（见 `core/database_v2.add_file` docstring）
 3. P0-4 取 A（写入后重读快照）
 
@@ -506,8 +516,8 @@ $ python -m pytest tests/ -q
 
 **当前状态**
 ```bash
-cd <repo>
-python -m pytest tests/ -q      # → 218 passed, 2 skipped（提供 samples/ 后 220 passed）
+cd X:/dev/local-media-manager
+python -m pytest tests/ -q      # → 220 passed
 git log --oneline -1
 ```
 

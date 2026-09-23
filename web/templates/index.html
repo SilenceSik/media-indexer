@@ -1,83 +1,86 @@
 <!DOCTYPE html>
-
-<html>
-
+<html lang="zh-CN">
 <head>
-
-<title>
-Local Media Manager
-</title>
-
-<link
-rel="stylesheet"
-href="/static/style.css">
-
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>媒体库</title>
+<link rel="stylesheet" href="/static/style.css">
 </head>
-
-
 <body>
 
+<div class="aurora"></div>
+<div class="grain"></div>
 
-<h1>
-Local Media Library
-</h1>
+<div class="wrap">
 
+  <nav class="nav">
+    <span class="brand"><span class="dot"></span>媒体库</span>
+    <div class="nav-links">
+      <a href="/" class="on">全部</a>
+      <a href="/?has_magnet=1">有磁力</a>
+      <a href="/?missing_meta=1">缺元数据</a>
+      <a href="/scan">扫描</a>
+    </div>
+    <form class="search" action="/search" method="get">
+      <input name="q" placeholder="搜索番号" value="{{ q or '' }}" autocomplete="off">
+      <button type="submit">搜索</button>
+    </form>
+  </nav>
 
+  <header class="hero">
+    <div>
+      <h1>本地媒体库<br><em>{{ stats.titles }}</em> 部已编号</h1>
+      <p>扫描目录后自动识别番号并落库。只有拿到已验证磁力的条目才允许被清理。</p>
+    </div>
+    <div class="stats">
+      <div class="stat"><b>{{ stats.files }}</b><span>文件</span></div>
+      <div class="stat"><b>{{ stats.size_h }}</b><span>占用</span></div>
+      <div class="stat"><b>{{ stats.magnets }}</b><span>已验证磁力</span></div>
+      <div class="stat"><b>{{ stats.covered }}</b><span>有封面</span></div>
+    </div>
+  </header>
 
-<form action="/search">
+  {% if q %}
+  <p class="section-h">搜索 “{{ q }}” · {{ videos|length }} 条结果</p>
+  {% endif %}
 
-<input
-name="q"
-placeholder="搜索番号">
+  <div class="grid">
 
-<button>
-Search
-</button>
+    {% for v in videos %}
+    <div class="shell">
+      <div class="card">
+        <div class="cover-box">
+          {% if v.cover_file %}
+          <img class="cover" src="/images/covers/{{ v.cover_file }}" alt="{{ v.number }}" loading="lazy">
+          {% else %}
+          <div class="cover-empty">NO COVER</div>
+          {% endif %}
+        </div>
+        <div class="meta">
+          <a class="num" href="/detail/{{ v.number }}">{{ v.number }}</a>
+          {% if v.title %}<span class="ttl">{{ v.title }}</span>{% endif %}
+          <span class="fn">{{ v.filename }}</span>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
 
-</form>
+    {% if not videos %}
+    <div class="empty">
+      <h3>{% if q %}没有匹配的番号{% else %}媒体库还是空的{% endif %}</h3>
+      <p>
+        {% if q %}
+        换个关键词试试，或返回 <a href="/" style="color:var(--accent)">全部</a>。
+        {% else %}
+        先跑一次扫描：<code>python main.py "你的目录"</code>
+        {% endif %}
+      </p>
+    </div>
+    {% endif %}
 
-
-
-<div class="grid">
-
-
-{% for v in videos %}
-
-
-<div class="card">
-
-
-{% if v.cover_local %}
-
-<img src="/images/covers/{{v.cover_local.split('/')[-1]}}">
-
-{% endif %}
-
-
-<h3>
-{{v.number}}
-</h3>
-
-
-<p>
-{{v.title}}
-</p>
-
-
-<p>
-{{v.filename}}
-</p>
-
+  </div>
 
 </div>
-
-
-{% endfor %}
-
-
-</div>
-
 
 </body>
-
 </html>

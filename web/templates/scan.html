@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>扫描</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="aurora"></div>
+<div class="grain"></div>
+
+<div class="wrap">
+
+  <nav class="nav">
+    <span class="brand"><span class="dot"></span>媒体库</span>
+    <div class="nav-links">
+      <a href="/">全部</a>
+      <a href="/?has_magnet=1">有磁力</a>
+      <a href="/?missing_meta=1">缺元数据</a>
+      <a href="/scan" class="on">扫描</a>
+    </div>
+    <form class="search" action="/search" method="get">
+      <input name="q" placeholder="搜索番号" autocomplete="off">
+      <button type="submit">搜索</button>
+    </form>
+  </nav>
+
+  <header class="hero" style="grid-template-columns:1fr; margin-bottom:3rem">
+    <div>
+      <h1>扫描目录</h1>
+      <p>指定一个目录，识别其中的番号并落库。格式白名单与目录排除照旧生效。</p>
+    </div>
+  </header>
+
+  <div class="shell" style="max-width:760px">
+    <div class="card" style="padding:1.75rem">
+
+      <label class="field">
+        <span>目录路径</span>
+        <input id="path" placeholder="例如 X:\迅雷下载" autocomplete="off" spellcheck="false">
+      </label>
+
+      {% if scan_paths %}
+      <div class="chips">
+        <span class="chips-label">config.yaml 里配的</span>
+        {% for p in scan_paths %}
+        <button class="chip" type="button" onclick="document.getElementById('path').value='{{ p }}'">{{ p }}</button>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <label class="check">
+        <input type="checkbox" id="dry">
+        <span>只预览不落库（dry-run）</span>
+      </label>
+
+      <div class="actions">
+        <button class="primary" id="go" onclick="start()">
+          <span>开始扫描</span>
+          <span class="arrow">→</span>
+        </button>
+        <span class="hint" id="hint"></span>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="progress-box" style="display:none; margin-top:2rem; max-width:760px">
+    <div class="shell">
+      <div class="card" style="padding:1.75rem">
+
+        <div class="prog-head">
+          <span class="mono" id="prog-path"></span>
+          <span class="mono" id="prog-count"></span>
+        </div>
+
+        <div class="bar"><div class="fill" id="bar"></div></div>
+
+        <div class="prog-stats" id="prog-stats"></div>
+
+        <div class="results" id="results"></div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+var timer = null;
+
+function start() {
+  var path = document.getElementById('path').value.trim();
+  var dry = document.getElementById('dry').checked;
+  var hint = document.getElementById('hint');
+
+  if (!path) { hint.textContent = '先填目录'; return; }
+
+  hint.textContent = '';
+  fetch('/api/scan/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: path, dry_run: dry })
+  })
+  .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+  .then(function (res) {
+    if (!res.j.ok) { hint.textContent = res.j.error || '启动失败'; return; }
+    document.getElementById('progress-box').style.display = 'block';
+    document.getElementById('go').disabled = true;
+    poll();
+  })
+  .catch(function (e) { hint.textContent = '请求失败: ' + e; });
+}
+
+function poll() {
+  fetch('/api/scan/status')
+    .then(function (r) { return r.json(); })
+    .then(function (job) {
+      render(job);
+      if (job.running) {
+        timer = setTimeout(poll, 400);
+      } else {
+        document.getElementById('go').disabled = false;
+        if (timer) { clearTimeout(timer); timer = null; }
+      }
+    });
+}
+
+function render(job) {
+  document.getElementById('prog-path').textContent = job.path || '';
+  document.getElementById('prog-count').textContent =
+    job.total ? (job.done + ' / ' + job.total) : (job.done + ' 个文件');
+
+  var pct = job.total ? Math.round(job.done / job.total * 100) : (job.running ? 12 : 100);
+  document.getElementById('bar').style.width = Math.min(100, pct) + '%';
+
+  var stats = [];
+  stats.push('落库 ' + job.saved);
+  if (job.dry_run) { stats.push('dry-run 模式'); }
+  if (job.error) { stats.push('错误: ' + job.error); }
+  document.getElementById('prog-stats').textContent = stats.join('  ·  ');
+
+  var box = document.getElementById('results');
+  var html = '';
+  for (var i = job.files.length - 1; i >= 0 && i > job.files.length - 61; i--) {
+    var f = job.files[i];
+    var nums = f.numbers.length
+      ? f.numbers.map(function (n) {
+          return '<span class="tag">' + n.number + '<i>' + n.confidence + '</i></span>';
+        }).join('')
+      : '<span class="tag miss">未识别</span>';
+    html += '<div class="row">'
+          + '<span class="fn">' + esc(f.file) + '</span>'
+          + '<span class="nums">' + nums + '</span>'
+          + '</div>';
+  }
+  box.innerHTML = html;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+</script>
+
+</body>
+</html>

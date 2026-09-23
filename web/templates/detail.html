@@ -1,72 +1,108 @@
 <!DOCTYPE html>
-
-<html>
-
+<html lang="zh-CN">
 <head>
-
-<title>
-{{video.number}}
-</title>
-
-<link
-rel="stylesheet"
-href="/static/style.css">
-
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ video.number }}</title>
+<link rel="stylesheet" href="/static/style.css">
 </head>
-
-
 <body>
 
+<div class="aurora"></div>
+<div class="grain"></div>
 
-<h1>
-{{video.number}}
-</h1>
+<div class="wrap">
 
+  <nav class="nav">
+    <span class="brand"><span class="dot"></span>媒体库</span>
+    <div class="nav-links">
+      <a href="/">全部</a>
+      <a href="/?has_magnet=1">有磁力</a>
+      <a href="/?missing_meta=1">缺元数据</a>
+      <a href="/scan">扫描</a>
+    </div>
+    <form class="search" action="/search" method="get">
+      <input name="q" placeholder="搜索番号" autocomplete="off">
+      <button type="submit">搜索</button>
+    </form>
+  </nav>
 
-{% if video.cover_local %}
+  <a class="back" href="/">← 返回列表</a>
 
-<img
-class="cover"
-src="/images/covers/{{video.cover_local.split('/')[-1]}}">
+  <div class="detail">
 
-{% endif %}
+    <div class="poster">
+      <div class="card">
+        <div class="cover-box">
+          {% if video.cover_file %}
+          <img class="cover" src="/images/covers/{{ video.cover_file }}" alt="{{ video.number }}">
+          {% else %}
+          <div class="cover-empty">NO COVER</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
 
+    <div>
+      <h1>{{ video.number }}</h1>
+      {% if video.title %}<p class="sub">{{ video.title }}</p>{% endif %}
 
-<h3>
-{{video.title}}
-</h3>
+      <dl class="spec">
+        <div><dt>文件</dt><dd class="mono">{{ video.file_count }} 个</dd></div>
+        <div><dt>占用</dt><dd class="mono">{{ video.size_h }}</dd></div>
+        {% if video.release_date %}<div><dt>发行日期</dt><dd>{{ video.release_date }}</dd></div>{% endif %}
+        {% if video.maker %}<div><dt>厂商</dt><dd>{{ video.maker }}</dd></div>{% endif %}
+        {% if video.actresses %}<div><dt>演员</dt><dd>{{ video.actresses }}</dd></div>{% endif %}
+        {% if video.tags %}<div><dt>标签</dt><dd>{{ video.tags }}</dd></div>{% endif %}
+      </dl>
 
+      <p class="section-h">本地文件</p>
+      <div class="magnet-list">
+        {% for f in video.files %}
+        <div class="magnet">
+          <span class="badge">{{ f.ext }}</span>
+          <span class="sz">{{ f.size_h }}</span>
+          <span class="src">{{ f.filename }}</span>
+        </div>
+        {% endfor %}
+      </div>
 
-<table>
+      <p class="section-h" style="margin-top:2.5rem">
+        磁力 · {{ video.magnets|length }} 条
+      </p>
+      {% if video.magnets %}
+      <div class="magnet-list">
+        {% for m in video.magnets %}
+        <div class="magnet">
+          <span class="badge {{ 'ok' if m.verified else '' }}">
+            {{ '已验证' if m.verified else '候选' }}
+          </span>
+          <span class="sz">{{ m.size_text or '未知' }}</span>
+          <span class="src">{{ m.source or '' }}</span>
+          <button class="copy" onclick="copyMagnet(this, '{{ m.magnet }}')">复制</button>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty" style="padding:2.5rem 1.5rem">
+        <p>这个番号还没有磁力记录，因此<strong>不可删除</strong>。</p>
+      </div>
+      {% endif %}
+    </div>
 
-<tr>
-<td>文件名</td>
-<td>{{video.filename}}</td>
-</tr>
+  </div>
 
-<tr>
-<td>发行日期</td>
-<td>{{video.release_date}}</td>
-</tr>
+</div>
 
-<tr>
-<td>厂商</td>
-<td>{{video.maker}}</td>
-</tr>
-
-<tr>
-<td>演员</td>
-<td>{{video.actresses}}</td>
-</tr>
-
-<tr>
-<td>标签</td>
-<td>{{video.tags}}</td>
-</tr>
-
-</table>
-
+<script>
+function copyMagnet(btn, text) {
+  navigator.clipboard.writeText(text).then(function () {
+    var old = btn.textContent;
+    btn.textContent = '已复制';
+    setTimeout(function () { btn.textContent = old; }, 1400);
+  });
+}
+</script>
 
 </body>
-
 </html>

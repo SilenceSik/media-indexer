@@ -41,7 +41,7 @@ excluded_dir_segments: []
 #  - "tencent files"
 #  - "backup"
 
-# v2 主库（唯一主线，）
+# v2 主库（唯一主线）
 database: "storage/library_v2.db"
 
 # v1 库，已冻结为只读迁移源，仅供 migration_v1_to_v2.py 使用

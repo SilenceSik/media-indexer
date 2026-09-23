@@ -1,9 +1,20 @@
 """入口：扫描 config.yaml 的 scan_paths 并落 v2 库。
 
 v1 版本（core.scanner / core.matcher / core.cache / core.database）已废弃，
-v2 是唯一主线，v1 旧实现保留在 git 历史里。
+v2 是唯一主线。旧实现保留在 git 历史里。
+
+用法::
+
+    python main.py                          # 扫 config.yaml 的 scan_paths
+    python main.py "X:\\迅雷下载"            # 只扫指定目录（覆盖 scan_paths）
+    python main.py "X:\\片" "X:\\下载"       # 扫多个目录
+    python main.py --list                   # 只列出将要扫描的目录，不执行
+
+**命令行传的目录同样受格式白名单与目录排除约束** —— 它们是安全防线，
+不因为「临时扫一下」而打开后门。命令行只改「扫哪里」，不改「什么算影片」。
 """
 
+import argparse
 import json
 import os
 
@@ -51,7 +62,44 @@ def load_rules(path):
         return json.load(fh)["rules"]
 
 
-def main():
+def parse_args(argv=None):
+    """解析命令行参数。
+
+    paths 为空 -> 用 config.yaml 的 scan_paths（保持原有行为）。
+    """
+
+    parser = argparse.ArgumentParser(
+        prog="main.py",
+        description="扫描媒体目录，识别番号并落库。",
+        epilog="不传路径时使用 config.yaml 的 scan_paths。",
+    )
+
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        metavar="目录",
+        help="要扫描的目录（可多个）；不传则用 config.yaml 的 scan_paths",
+    )
+
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        dest="list_only",
+        help="只列出将要扫描的目录，不执行扫描",
+    )
+
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="真·干跑：解析并显示结果，但不写库、不推进增量索引",
+    )
+
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+
+    args = parse_args(argv)
 
     config = load_config()
 
@@ -68,6 +116,43 @@ def main():
         resolve_path(config["dictionary"])
     )
 
+    # 命令行给了路径就用命令行，否则回退 config
+    if args.paths:
+
+        targets = list(args.paths)
+
+        source = "命令行"
+
+    else:
+
+        targets = list(
+            config.get("scan_paths") or []
+        )
+
+        source = "config.yaml"
+
+    if not targets:
+
+        print("没有要扫描的目录：命令行未给路径，config.yaml 的 scan_paths 也是空的。")
+
+        return 1
+
+    print(f"扫描目录（来源：{source}）：")
+
+    for path in targets:
+
+        mark = "  " if os.path.isdir(path) else "✗ "
+
+        note = "" if os.path.isdir(path) else "   <- 目录不存在"
+
+        print(f"{mark}{path}{note}")
+
+    if args.list_only:
+
+        print("\n（--list：仅列出，未执行扫描）")
+
+        return 0
+
     db = Database(database)
 
     service = ScanService(
@@ -76,13 +161,22 @@ def main():
         db=db
     )
 
-    for path in config.get("scan_paths") or []:
+    total_files = 0
+    total_saved = 0
+
+    for path in targets:
+
+        if not os.path.isdir(path):
+
+            print(f"\n跳过（不是目录）：{path}")
+
+            continue
 
         print(f"\nScanning: {path}")
 
         result = service.scan(
             path,
-            persist=True
+            persist=not args.dry_run
         )
 
         rows = result["data"]
@@ -91,13 +185,41 @@ def main():
             1 for row in rows if row["persisted"]
         )
 
-        print(
-            f"  文件 {len(rows)} / 落库 {persisted}"
-        )
+        total_files += len(rows)
+        total_saved += persisted
 
-    print("\n完成")
+        if args.dry_run:
+
+            print(f"  文件 {len(rows)}  [dry-run：未落库]")
+
+            for row in rows[:20]:
+
+                nums = ", ".join(
+                    f"{n['number']}({n['confidence']})"
+                    for n in row["numbers"][:3]
+                ) or "—"
+
+                print(f"    {os.path.basename(row['file'])}  ->  {nums}")
+
+            if len(rows) > 20:
+
+                print(f"    ...另有 {len(rows) - 20} 个")
+
+        else:
+
+            print(f"  文件 {len(rows)} / 落库 {persisted}")
+
+    if args.dry_run:
+
+        print(f"\n完成（dry-run）：共 {total_files} 个文件，未写库")
+
+    else:
+
+        print(f"\n完成：共 {total_files} 个文件，落库 {total_saved} 条")
+
+    return 0
 
 
 if __name__ == "__main__":
 
-    main()
+    raise SystemExit(main())

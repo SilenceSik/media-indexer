@@ -433,6 +433,13 @@ class NumberMatcher:
                 )
 
         # 2) 通用引擎（移植自 code_extract3）
+        # 先记下 118 系匹配覆盖的区间：`118abp00171hhb` 是**一个**站点 token，
+        # 其中的 `118` + 字母 + 数字会被 P_NUMPFX 再匹配一次，产出同义异形键
+        # （ABP-171 vs ABP-00171）→ 去重失效 → 同一部片两条记录。
+        # 实测：`118abp00171hhb.mp4` 在修 118 零填充之前两条规则恰好都吐
+        # `ABP-00171`（靠巧合去重）；修完之后分歧才显形。故显式排除重叠区间。
+        span_118 = []
+
         for m in P_118.finditer(clean):
             # 118 站点的 5 位零填充是站点 ID 编码，须还原成番号本体数字
             # （`118abp00171hhb` -> ABP-171，见 _site_padded_num 的三重佐证）
@@ -440,6 +447,18 @@ class NumberMatcher:
                 _norm(m.group(1), _site_padded_num(m.group(2))),
                 CONF_STD_KNOWN,
                 '118',
+            )
+
+            span_118.append(
+                (m.start(), m.end())
+            )
+
+        def _in_118(m):
+            """该匹配是否落在 118 站点 token 内。"""
+
+            return any(
+                start <= m.start() and m.end() <= end
+                for start, end in span_118
             )
 
         for m in P_FC2_PPV.finditer(clean):
@@ -470,6 +489,10 @@ class NumberMatcher:
             prefix = m.group(1).upper()
 
             if prefix in NOT_STUDIO:
+                continue
+
+            # 落在 118 站点 token 内的不再重复产出（同义异形键，见上）
+            if _in_118(m):
                 continue
 
             # numpfx 置信度按厂牌分档（2026-09-23 JavDB 实测校准）：

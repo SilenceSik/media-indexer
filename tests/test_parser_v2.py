@@ -235,6 +235,24 @@ def test_118_site_padding_is_site_id_not_number(parser, filename, expected):
     assert expected in numbers(parser, filename)
 
 
+@pytest.mark.parametrize("filename", [
+    "118abp00171hhb_000^WM.mp4",
+    "118ppt00016hhb1.mkv",
+    "[NoDRM]-118abp00108hhb.wmv",
+])
+def test_118_does_not_emit_synonym_key(parser, filename):
+    """118 站点 token 只能产出**一个**番号键。
+
+    `118abp00171hhb` 里的 `118`+字母+数字会被 P_NUMPFX 再匹配一次，产出
+    同义异形键（ABP-171 vs ABP-00171）→ 同一部片两条记录 → 去重失效。
+    修 118 零填充之前两条规则恰好都吐同一个键（靠巧合去重），修完才显形。
+    """
+
+    found = numbers(parser, filename)
+
+    assert len(found) == 1, f"应只产出一个键，实际 {found}"
+
+
 # ────────────────────────────────── 6. 噪音剥除（真实语料回归线）
 
 @pytest.mark.parametrize("filename,expected", [

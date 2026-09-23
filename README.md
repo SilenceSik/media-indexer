@@ -100,10 +100,41 @@ excluded_dir_segments:
 ### 命令行扫描
 
 ```bash
-python main.py
+python main.py                    # 扫 config.yaml 的 scan_paths
+python main.py "X:\迅雷下载"       # 只扫指定目录（覆盖 scan_paths）
+python main.py "X:\片" "X:\下载"   # 扫多个目录
+python main.py --list "X:\片"      # 只列出将扫描的目录，不执行
+python main.py --dry-run "X:\片"   # 真·干跑：解析并打印结果，不写库
 ```
 
-遍历 `scan_paths`，识别并落库。
+遍历目标目录，识别并落库。
+
+**命令行传的目录同样受格式白名单与目录排除约束** —— 它们是安全防线，
+不因为「临时扫一下」而打开后门。命令行只改「扫哪里」，不改「什么算影片」。
+
+### Web UI
+
+```bash
+python web/app.py                 # 默认 http://127.0.0.1:8811
+# 或
+python -m uvicorn web.app:app --host 127.0.0.1 --port 8811
+```
+
+| 页面 | 作用 |
+|---|---|
+| `/` | 番号列表（封面网格），支持「有磁力」「缺元数据」筛选 |
+| `/search?q=` | 按番号搜索 |
+| `/detail/<番号>` | 单条详情：本地文件、磁力列表（含已验证标记）、删除门控状态 |
+| `/scan` | 在界面里指定目录扫描，带实时进度与逐文件识别结果 |
+| `/docs` | FastAPI 自动生成的接口文档 |
+
+两个环境变量便于用独立数据跑演示实例而不动生产库：
+
+```bash
+LMM_DB=/path/to/other.db LMM_COVERS=/path/to/covers python web/app.py
+```
+
+> Web UI 是**只读浏览 + 扫描触发**。删除动作不在界面里，见下方「没有磁力就不许删」。
 
 ### 作为 MCP 服务
 
