@@ -1,0 +1,24 @@
+# 依赖按实际 import 点分组（2026-09-23 用 AST 核对，非照抄模板）。
+# 装核心即可跑 v2 主线 + 测试；Web 与 v1 遗留段按需装。
+#
+# ⚠️ mcp 版本已钉死：本环境 mcp.server.fastmcp 已移除，入口是 mcp.server.MCPServer。
+#    实测 2.0.0 通过，不要放宽成 >=1.0（API 不兼容，导入即失败）。
+
+# ── 核心（v2 主线 + 入口脚本）─────────────────────────────────
+PyYAML>=6.0
+mcp==2.0.0
+
+# ── Web 控制台（web/app.py）───────────────────────────────────
+fastapi>=0.110
+uvicorn>=0.27
+jinja2>=3.1
+
+# ── v1 遗留链路（仅 v1 入口脚本用到）──────────────────────────
+# requests  : core/image_cache.py -> core/metadata.py -> metadata_update.py
+# schedule  : core/scheduler.py（v2 主线下无人引用，见 P2-1）
+# watchdog  : core/watcher.py  （v2 主线下无人引用，见 P2-1）
+# 不跑 v1 遗留代码可以不装这三个。
+# tqdm 已移除：全仓库零 import（AST 核对）。
+requests>=2.31
+# schedule>=1.2
+# watchdog>=4.0

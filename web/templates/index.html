@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<title>
+Local Media Manager
+</title>
+
+<link
+rel="stylesheet"
+href="/static/style.css">
+
+</head>
+
+
+<body>
+
+
+<h1>
+Local Media Library
+</h1>
+
+
+
+<form action="/search">
+
+<input
+name="q"
+placeholder="搜索番号">
+
+<button>
+Search
+</button>
+
+</form>
+
+
+
+<div class="grid">
+
+
+{% for v in videos %}
+
+
+<div class="card">
+
+
+{% if v.cover_local %}
+
+<img src="/images/covers/{{v.cover_local.split('/')[-1]}}">
+
+{% endif %}
+
+
+<h3>
+{{v.number}}
+</h3>
+
+
+<p>
+{{v.title}}
+</p>
+
+
+<p>
+{{v.filename}}
+</p>
+
+
+</div>
+
+
+{% endfor %}
+
+
+</div>
+
+
+</body>
+
+</html>

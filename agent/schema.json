@@ -1,0 +1,58 @@
+{
+  "name": "local-media-manager",
+
+  "description":
+  "Local media library management tools",
+
+  "tools":[
+
+    {
+      "name":"search",
+      "description":
+      "Search local media library"
+    },
+
+    {
+      "name":"missing_metadata",
+      "description":
+      "Find files without metadata"
+    },
+
+    {
+      "name":"missing_cover",
+      "description":
+      "Find items without cover"
+    },
+
+    {
+      "name":"statistics",
+      "description":
+      "Get library statistics"
+    },
+
+    {
+      "name":"audit_library",
+      "description":
+      "Check library problems"
+    },
+
+    {
+      "name":"rename_plan",
+      "description":
+      "Create file rename plan (no execution)"
+    },
+
+    {
+      "name":"actor_search",
+      "description":
+      "Search works by actor"
+    },
+
+    {
+      "name":"tag_search",
+      "description":
+      "Search works by tag"
+    }
+
+  ]
+}

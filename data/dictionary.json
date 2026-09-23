@@ -1,0 +1,501 @@
+{
+    "rules": [
+        {
+            "code": "FC2",
+            "aliases": [
+                "FC2PPV",
+                "FC2-PPV"
+            ],
+            "pattern": "FC2[-_ ]?PPV[-_ ]?\\d{3,9}|FC2[-_ ]?\\d{3,9}",
+            "priority": 100
+        },
+        {
+            "code": "ABP",
+            "aliases": [],
+            "pattern": "ABP[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "IPX",
+            "aliases": [],
+            "pattern": "IPX[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "SSIS",
+            "aliases": [
+                "SSIS-"
+            ],
+            "pattern": "SSIS[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "SSNI",
+            "aliases": [],
+            "pattern": "SSNI[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "SONE",
+            "aliases": [],
+            "pattern": "SONE[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "IPZZ",
+            "aliases": [],
+            "pattern": "IPZZ[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "MIDV",
+            "aliases": [],
+            "pattern": "MIDV[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "FSDSS",
+            "aliases": [],
+            "pattern": "FSDSS[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "MIAA",
+            "aliases": [],
+            "pattern": "MIAA[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "MIAE",
+            "aliases": [],
+            "pattern": "MIAE[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "MIRD",
+            "aliases": [],
+            "pattern": "MIRD[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "MIGD",
+            "aliases": [],
+            "pattern": "MIGD[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "MIZD",
+            "aliases": [],
+            "pattern": "MIZD[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "MIMK",
+            "aliases": [],
+            "pattern": "MIMK[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "MIDE",
+            "aliases": [],
+            "pattern": "MIDE[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "MIFD",
+            "aliases": [],
+            "pattern": "MIFD[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "DLDSS",
+            "aliases": [],
+            "pattern": "DLDSS[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "PRED",
+            "aliases": [],
+            "pattern": "PRED[-_ ]?\\d{3,6}",
+            "priority": 100
+        },
+        {
+            "code": "STARS",
+            "aliases": [],
+            "pattern": "STARS[-_ ]?\\d{2,6}",
+            "priority": 100
+        },
+        {
+            "code": "START",
+            "aliases": [],
+            "pattern": "START[-_ ]?\\d{2,6}",
+            "priority": 100
+        },
+        {
+            "code": "ABW",
+            "aliases": [],
+            "pattern": "ABW[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "ABF",
+            "aliases": [],
+            "pattern": "ABF[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "ABS",
+            "aliases": [],
+            "pattern": "ABS[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "JUQ",
+            "aliases": [],
+            "pattern": "JUQ[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "JUL",
+            "aliases": [],
+            "pattern": "JUL[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "JUFD",
+            "aliases": [],
+            "pattern": "JUFD[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "JUKF",
+            "aliases": [],
+            "pattern": "JUKF[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "JMTY",
+            "aliases": [],
+            "pattern": "JMTY[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "JJDA",
+            "aliases": [],
+            "pattern": "JJDA[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "CAWD",
+            "aliases": [],
+            "pattern": "CAWD[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "EBWH",
+            "aliases": [],
+            "pattern": "EBWH[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "SDDE",
+            "aliases": [],
+            "pattern": "SDDE[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "SDMF",
+            "aliases": [],
+            "pattern": "SDMF[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "SDMU",
+            "aliases": [],
+            "pattern": "SDMU[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "SABA",
+            "aliases": [],
+            "pattern": "SABA[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "SACZ",
+            "aliases": [],
+            "pattern": "SACZ[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "DASS",
+            "aliases": [],
+            "pattern": "DASS[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "DVAJ",
+            "aliases": [],
+            "pattern": "DVAJ[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "ONED",
+            "aliases": [],
+            "pattern": "ONED[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "OFJE",
+            "aliases": [],
+            "pattern": "OFJE[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "DANDY",
+            "aliases": [],
+            "pattern": "DANDY[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "HND",
+            "aliases": [],
+            "pattern": "HND[-_ ]?\\d{2,5}",
+            "priority": 90
+        },
+        {
+            "code": "HNDS",
+            "aliases": [],
+            "pattern": "HNDS[-_ ]?\\d{2,5}",
+            "priority": 90
+        },
+        {
+            "code": "HUNTC",
+            "aliases": [],
+            "pattern": "HUNTC[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "HUNBL",
+            "aliases": [],
+            "pattern": "HUNBL[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "NHDTB",
+            "aliases": [],
+            "pattern": "NHDTB[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "NHDTC",
+            "aliases": [],
+            "pattern": "NHDTC[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "NKKD",
+            "aliases": [],
+            "pattern": "NKKD[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "NSFS",
+            "aliases": [],
+            "pattern": "NSFS[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "WANZ",
+            "aliases": [],
+            "pattern": "WANZ[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "MXGS",
+            "aliases": [],
+            "pattern": "MXGS[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "MKMP",
+            "aliases": [],
+            "pattern": "MKMP[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "MVG",
+            "aliases": [],
+            "pattern": "MVG[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "HEYZO",
+            "aliases": [],
+            "pattern": "HEYZO[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "TOKYO",
+            "aliases": [],
+            "pattern": "TOKYO[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "SIRO",
+            "aliases": [],
+            "pattern": "SIRO[-_ ]?\\d{2,6}",
+            "priority": 90
+        },
+        {
+            "code": "GANA",
+            "aliases": [],
+            "pattern": "GANA[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "GIGL",
+            "aliases": [],
+            "pattern": "GIGL[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "GVH",
+            "aliases": [],
+            "pattern": "GVH[-_ ]?\\d{2,6}",
+            "priority": 90
+        },
+        {
+            "code": "BBAN",
+            "aliases": [],
+            "pattern": "BBAN[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "BOBB",
+            "aliases": [],
+            "pattern": "BOBB[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "BOBS",
+            "aliases": [],
+            "pattern": "BOBS[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "DVDMS",
+            "aliases": [],
+            "pattern": "DVDMS[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "MEYD",
+            "aliases": [],
+            "pattern": "MEYD[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "MDBK",
+            "aliases": [],
+            "pattern": "MDBK[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "HDKA",
+            "aliases": [],
+            "pattern": "HDKA[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "VRTM",
+            "aliases": [],
+            "pattern": "VRTM[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "VEC",
+            "aliases": [],
+            "pattern": "VEC[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "URE",
+            "aliases": [],
+            "pattern": "URE[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "RKI",
+            "aliases": [],
+            "pattern": "RKI[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "CHN",
+            "aliases": [],
+            "pattern": "CHN[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "PPT",
+            "aliases": [],
+            "pattern": "PPT[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "ADN",
+            "aliases": [],
+            "pattern": "ADN[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "KNB",
+            "aliases": [],
+            "pattern": "KNB[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "NIMA",
+            "aliases": [],
+            "pattern": "NIMA[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "ASI",
+            "aliases": [],
+            "pattern": "ASI[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "SNOS",
+            "aliases": [],
+            "pattern": "SNOS[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "HONB",
+            "aliases": [],
+            "pattern": "HONB[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "IPIT",
+            "aliases": [],
+            "pattern": "IPIT[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "IPKF",
+            "aliases": [],
+            "pattern": "IPKF[-_ ]?\\d{3,6}",
+            "priority": 90
+        },
+        {
+            "code": "SOE",
+            "aliases": [],
+            "pattern": "SOE[-_ ]?\\d{3,6}",
+            "priority": 90
+        }
+    ]
+}

@@ -1,0 +1,46 @@
+scan_paths:
+  - "X:\\"
+
+# 番号匹配格式白名单 —— **追加**语义，不是覆盖。
+#
+# 程序自带一套标准视频格式（core/scanner_v2.DEFAULT_VIDEO_EXTENSIONS）：
+#   .mp4 .mkv .avi .mov .wmv .flv .mpg .mpeg .m4v .ts .m2ts
+# 这里写的是「我还想额外收哪些格式」，会被**叠加**到上面那套之上。
+#
+# 实测依据（26,230 条真实语料）：
+#   - 可信档（confidence >= 90）命中 223 个文件，全部落在
+#     .mp4 / .mkv / .wmv / .avi，其余格式可信产出为 0
+#   - .webm 有 15,593 个（占语料 59.4%），可信产出 0.00%，
+#     低分档假阳性几乎全是 .webm 片段（录屏 / OF / 3D 动画）
+#     所以它不在默认里 —— 真有个别番号是 .webm 时再往下加
+#   - .rmvb / .rm 同为 0 产出，同样不默认收录
+#
+# 追加示例（取消注释即可生效，无需改代码）：
+video_extensions: []
+#  - ".webm"
+#  - ".rmvb"
+#  - ".rm"
+
+# v2 主库（唯一主线）
+database: "storage/library_v2.db"
+
+# v1 库，已冻结为只读迁移源，仅供 migration_v1_to_v2.py 使用
+database_v1_legacy: "storage/library.db"
+
+# 扫描增量索引库（file_index 表，由 core.file_index.FileIndex 独立建库）
+index_db: "storage/file_index_v2.db"
+
+dictionary: "data/dictionary.json"
+
+image_storage:
+  covers: "storage/images/covers"
+  screenshots: "storage/images/screenshots"
+
+library_path: "X:\\MediaLibrary"
+
+organize:
+  library_path: "X:\\MediaLibrary"
+  folder_template: "{number}"
+  filename_template: "{number}{ext}"
+  mode: "move"
+  keep_original: false
