@@ -1,4 +1,4 @@
-"""番号识别引擎 v3 —— 从早期原型脚本移植而来
+"""番号识别引擎 v3 —— 移植自 早期原型脚本
 （源实现在 26,230 个真实文件名上做过全量实测迭代）。
 
 框架契约（C1/C4 依赖，不得改）::
@@ -16,7 +16,7 @@ v2 -> v3 修掉的三类缺陷
    v3 一律 ``re.finditer`` + ``m.group(0)`` 取整段匹配。
 
 2. 覆盖率
-   字典规则 -> 通用厂牌兜底 + 无厂牌纯数字番号 + tnum / numpfx / 118 系结构。
+   字典 13 条规则 -> 通用厂牌兜底 + 无厂牌纯数字番号 + tnum / numpfx / 118 系结构。
 
 3. 噪音
    字幕组 / 站名 / 技术标记 / 欧美点分名 会污染匹配，先剥后匹配
@@ -286,6 +286,9 @@ KNOWN_STUDIO = {
     'BOBB', 'T28', 'T38', 'GANA', 'HEYZO', 'TOKYO', 'HDKA', 'MDBK', 'SIRO',
     'DVDMS', 'OFJE', 'MIGD', 'NSFS', 'RKI', 'WANZ', 'MXGS', 'MIZD', 'MEYD',
     'URE', 'VEC', 'VRTM', 'GIGL', 'GVH', 'JUKF', 'JJDA', 'JMTY', 'HONB',
+    # 2026-09-23 JavDB 实测补录：`261ARA-462` 剥数字前缀后 `ARA-462`
+    # 在 JavDB 实存（原形态查不到），属 numpfx 可剥型。
+    'ARA',
 }
 
 # 通用厂牌规则命中的置信度
@@ -302,6 +305,22 @@ def _norm(prefix, num):
     """拼番号。**保留前导零**（与源实现的 lstrip('0') 有意不同，见模块 docstring）。"""
 
     return '{}-{}'.format(prefix.upper(), num)
+
+
+def _site_padded_num(num):
+    """118 系站点 ID -> 番号数字本体。
+
+    `118` 站点把番号数字打成**固定 5 位 ID**，那个零填充属于站点编码，
+    不是番号形态。三重实测佐证（2026-09-23）：
+      `118abp00171hhb_000^WM.mp4` 在目录 `ABP-171\\` 下，JavDB 收 `ABP-171`
+      `[NoDRM]-118abp00108hhb.wmv` 在目录 `[HD]ABP-108\\` 下，JavDB 收 `ABP-108`
+      `118ppt00016hhb1.mkv`     在目录 `PPT-016\\` 下，JavDB 收 `PPT-016`
+    故剥前导零后按番号规范宽度补足 3 位（<1000 补零，>=1000 原样）。
+    """
+
+    value = int(num)
+
+    return '{:03d}'.format(value) if value < 1000 else str(value)
 
 
 # FC2 前缀形态归一：FC2PPV / FC2_PPV / FC2 PPV -> FC2-PPV
@@ -415,7 +434,13 @@ class NumberMatcher:
 
         # 2) 通用引擎（移植自 code_extract3）
         for m in P_118.finditer(clean):
-            add(_norm(m.group(1), m.group(2)), CONF_STD_KNOWN, '118')
+            # 118 站点的 5 位零填充是站点 ID 编码，须还原成番号本体数字
+            # （`118abp00171hhb` -> ABP-171，见 _site_padded_num 的三重佐证）
+            add(
+                _norm(m.group(1), _site_padded_num(m.group(2))),
+                CONF_STD_KNOWN,
+                '118',
+            )
 
         for m in P_FC2_PPV.finditer(clean):
             add('FC2-PPV-{}'.format(m.group(1)), CONF_FC2, 'fc2')
@@ -447,7 +472,20 @@ class NumberMatcher:
             if prefix in NOT_STUDIO:
                 continue
 
-            add(_norm(prefix, m.group(2)), CONF_NUMPFX, 'numpfx')
+            # numpfx 置信度按厂牌分档（2026-09-23 JavDB 实测校准）：
+            #   `300MAAN-403`->MAAN-403 / `200GANA-3309`->GANA-3309 /
+            #   `390JNT-022`->JNT-022 / `261ARA-462`->ARA-462 —— 剥掉数字
+            #   前缀后在 JavDB 均**实存**，而原形态一律查不到；说明这里的
+            #   数字是发布方打的系列标，剥掉才是真番号。
+            #   一律给 60 会把真番号压在可信线以下 → 剥后前缀已收录则 90。
+            #   未收录前缀（如 `91CM-101`->CM-101）维持 60：JavDB 对
+            #   91CM 全形态（91CM-101/182/190）**均无覆盖**，无 ground
+            #   truth 可判定剥与不剥孰对，故沿用既有形态、不改判。
+            add(
+                _norm(prefix, m.group(2)),
+                CONF_STD_KNOWN if prefix in KNOWN_STUDIO else CONF_NUMPFX,
+                'numpfx',
+            )
 
         # 3) 兜底：只在前面全空时才跑（源实现同序，避免把 FC2 的数字重复计一遍）
         if not candidates:

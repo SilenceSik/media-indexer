@@ -21,7 +21,27 @@ video_extensions: []
 #  - ".rmvb"
 #  - ".rm"
 
-# v2 主库（唯一主线）
+# 不参与 番号匹配的目录 —— **追加**语义，不是覆盖。
+#
+# 程序自带一套内置排除目录（core.scanner_v2.DEFAULT_EXCLUDED_DIR_SEGMENTS）：
+#   ga game www animations __pycache__ node_modules
+# 这里写的是「我还想额外排除哪些目录名」，会被**叠加**到上面那套之上。
+#
+# 依据（26,230 条真实语料实测）：
+#   - X:\ga\（成人游戏资源树）占语料 71.6%，贡献 268 条解析
+#     命中，但可信档产出 0 —— 全部是游戏内视频段与引擎缓存名
+#   - 全语料中带 game / www 目录段的文件，可信产出同样是 0
+#   - 可信档 223 条中，无一路径包含 game / www / ga 段
+#
+# 匹配的是路径「任意一段」（不区分大小写），不是子串包含：
+#   "X:\ga\..."       -> 排除
+#   "X:\Movie\game\"  -> 排除
+#   "X:\Gaunt\x.mp4"  -> 保留（段名不等，子串相同不算）
+excluded_dir_segments: []
+#  - "tencent files"
+#  - "backup"
+
+# v2 主库（唯一主线，）
 database: "storage/library_v2.db"
 
 # v1 库，已冻结为只读迁移源，仅供 migration_v1_to_v2.py 使用

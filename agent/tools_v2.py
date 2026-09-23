@@ -1,7 +1,7 @@
 """MCP 工具层（v2 主线）。
 
 入口依据：本环境 mcp == 2.0.0，`mcp.server.fastmcp` 已移除，
-server 类改名为 `mcp.server.MCPServer`（实测确认）。
+server 类改名为 `mcp.server.MCPServer`（探法见卡 t_d84b81d3 交付说明）。
 
 ⚠️ 线程模型（实机踩过，别改回去）：
 mcp 2.0.0 的 MCPServer 对**同步**工具函数走
@@ -205,6 +205,14 @@ def build_scan_service():
         extensions=CONFIG.get(
 
             "video_extensions"
+
+        ) or [],
+
+        # config.yaml: excluded_dir_segments 同为「追加」语义（内置
+        # 游戏引擎/软件资源目录由 core.scanner_v2 叠加，见 resolve_segments）
+        excluded_segments=CONFIG.get(
+
+            "excluded_dir_segments"
 
         ) or []
     )

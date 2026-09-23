@@ -222,6 +222,19 @@ def test_alnum_prefixed_studio(parser):
     assert "T28-571" in numbers(parser, "T28-571.mp4")
 
 
+@pytest.mark.parametrize("filename,expected", [
+    # 118 站点的 5 位零填充是站点 ID 编码，须还原成番号本体数字。
+    # 三重实测佐证：三个文件所在目录名 + JavDB 收录形态都是去零后的结果。
+    ("118abp00171hhb_000^WM.mp4", "ABP-171"),          # 目录 ABP-171\
+    ("[NoDRM]-118abp00108hhb.wmv", "ABP-108"),        # 目录 [HD]ABP-108\
+    ("118ppt00016hhb1.mkv", "PPT-016"),                # 目录 PPT-016\
+    # >=1000 原样（不得被补成 5 位）
+    ("118abp01234hhb.mp4", "ABP-1234"),
+])
+def test_118_site_padding_is_site_id_not_number(parser, filename, expected):
+    assert expected in numbers(parser, filename)
+
+
 # ────────────────────────────────── 6. 噪音剥除（真实语料回归线）
 
 @pytest.mark.parametrize("filename,expected", [
@@ -509,7 +522,7 @@ def test_real_corpus_sample(parser, filename, expected):
         assert expected in found
 
 
-# ────────────────────── 13. 外部审查核实后的修复（2026-09-23）
+# ────────────────────── 13. Astra 审查核实后的修复（2026-09-23）
 
 def test_canonical_adds_separator_to_no_sep_form():
     """无分隔形态必须补分隔符 —— 否则同一文件产出两个同义键（去重失效）。

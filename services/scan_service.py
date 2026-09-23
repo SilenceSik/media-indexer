@@ -14,7 +14,8 @@ class ScanService:
         index_db,
         rules,
         db=None,
-        extensions=None
+        extensions=None,
+        excluded_segments=None
     ):
 
         # 规则集指纹写进 file_index：字典一变，已索引的文件也算 changed
@@ -27,7 +28,8 @@ class ScanService:
         self.scanner = Scanner(
             index_db,
             rules_version=self.rules_version,
-            extensions=extensions
+            extensions=extensions,
+            excluded_segments=excluded_segments
         )
 
         self.parser = Parser(
