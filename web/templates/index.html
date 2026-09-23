@@ -50,7 +50,72 @@
     </button>
     <button class="ghost" onclick="enrichAll()">补抓缺元数据</button>
     <button class="ghost" onclick="saveAllTorrents()">导出全部磁力</button>
+    <button class="ghost" onclick="openLowScore()">清理低分卡片</button>
+    <button class="ghost" onclick="openImport()">手动加入文件</button>
     <span class="hint" id="bar-hint"></span>
+  </div>
+
+  <!-- 清理低分卡片 -->
+  <div class="modal" id="modal-low" style="display:none">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>清理低分卡片</h3>
+        <button class="x" onclick="closeModal('modal-low')">×</button>
+      </div>
+
+      <p class="modal-note">
+        按当前识别规则重新算分，列出 <strong>≤ 阈值</strong> 的库内条目。
+        清理是<strong>只从库里摘除记录，磁盘文件不动</strong>；
+        真要删文件请用卡片上的「删除」按钮（那条路有磁力门控 + 回收站）。
+      </p>
+
+      <div class="slider-row" style="grid-template-columns:2.6rem 1fr 2.6rem">
+        <span class="slider-name">阈值</span>
+        <input type="range" id="low-score" min="0" max="100" value="79" step="1"
+               oninput="lowScoreChanged()">
+        <span class="slider-num mono" id="low-score-val">79</span>
+      </div>
+
+      <div class="modal-actions">
+        <button class="ghost" onclick="previewLowScore()">预览</button>
+        <button class="ghost danger" id="low-del" onclick="removeLowScore()" disabled>
+          从库中摘除
+        </button>
+        <span class="hint" id="low-hint"></span>
+      </div>
+
+      <div id="low-list" class="modal-list"></div>
+    </div>
+  </div>
+
+  <!-- 手动加入文件 -->
+  <div class="modal" id="modal-import" style="display:none">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>手动加入文件</h3>
+        <button class="x" onclick="closeModal('modal-import')">×</button>
+      </div>
+
+      <p class="modal-note">
+        指定一个文件夹，识别其中的番号并立即加入库。适合「我就想加这几个文件」。
+        批量扫描请走「扫描并抓取」。
+      </p>
+
+      <label class="field">
+        <span>文件夹路径</span>
+        <input id="import-path" placeholder="例如 X:\新下载" autocomplete="off" spellcheck="false">
+      </label>
+
+      <div class="modal-actions">
+        <button class="primary" onclick="doImport()">
+          <span>加入媒体库</span>
+          <span class="arrow">→</span>
+        </button>
+        <span class="hint" id="import-hint"></span>
+      </div>
+
+      <div id="import-list" class="modal-list"></div>
+    </div>
   </div>
 
   <div id="jobbar" style="display:none">
@@ -264,6 +329,155 @@ function ctl(action) {
   post('/api/scan/' + action).then(function (res) {
     if (!res.j.ok) { alert(res.j.message || '操作失败'); return; }
     if (action !== 'stop') setTimeout(poll, 300);
+  });
+}
+
+// ── 弹窗 ──────────────────────────────────────────────────
+function closeModal(id) {
+  document.getElementById(id).style.display = 'none';
+}
+
+// ── 清理低分卡片 ──────────────────────────────────────────
+var lowEntries = [];
+
+function openLowScore() {
+  document.getElementById('modal-low').style.display = 'flex';
+  document.getElementById('low-hint').textContent = '';
+  previewLowScore();
+}
+
+function lowScoreChanged() {
+  document.getElementById('low-score-val').textContent =
+    document.getElementById('low-score').value;
+  document.getElementById('low-del').disabled = true;
+  document.getElementById('low-list').innerHTML = '';
+  lowEntries = [];
+}
+
+function previewLowScore() {
+  var score = document.getElementById('low-score').value;
+  var hint = document.getElementById('low-hint');
+  hint.textContent = '查询中…';
+
+  fetch('/api/low-score?max_score=' + score)
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      hint.textContent = '';
+      lowEntries = j.entries || [];
+
+      var box = document.getElementById('low-list');
+
+      if (!lowEntries.length) {
+        box.innerHTML = '<div class="modal-empty">没有 ≤ ' + score + ' 分的条目</div>';
+        document.getElementById('low-del').disabled = true;
+        return;
+      }
+
+      document.getElementById('low-del').disabled = false;
+
+      var html = '<div class="modal-list-h">找到 ' + j.count + ' 条'
+               + (j.count > lowEntries.length ? '（显示前 ' + lowEntries.length + '）' : '')
+               + '</div>';
+
+      // 分布直方图：70 分档里混着"厂牌未收录的真番号"，
+      // 只看条数容易一刀切，先看分布再定阈值
+      var dist = j.distribution || {};
+      var keys = Object.keys(dist).sort(function (a, b) { return b - a; });
+      if (keys.length > 1) {
+        var maxN = Math.max.apply(null, keys.map(function (k) { return dist[k]; }));
+        html += '<div class="dist">';
+        keys.forEach(function (k) {
+          var w = Math.max(4, Math.round(dist[k] / maxN * 100));
+          html += '<div class="dist-row">'
+                + '<span class="dist-k mono">' + k + ' 分</span>'
+                + '<span class="dist-bar"><i style="width:' + w + '%"></i></span>'
+                + '<span class="dist-n mono">' + dist[k] + '</span>'
+                + '</div>';
+        });
+        html += '</div>';
+      }
+
+      lowEntries.forEach(function (e) {
+        html += '<div class="modal-row">'
+              + '<span class="tag">' + esc(e.number || '—')
+              + '<i>' + e.confidence + '</i></span>'
+              + '<span class="fntxt">' + esc(e.filename || e.filepath) + '</span>'
+              + '</div>';
+      });
+
+      box.innerHTML = html;
+    })
+    .catch(function (e) { hint.textContent = '查询失败：' + e; });
+}
+
+function removeLowScore() {
+  if (!lowEntries.length) return;
+
+  if (!confirm('从库中摘除这 ' + lowEntries.length + ' 条记录？\n\n'
+             + '磁盘上的文件不会被删除，只是不再出现在媒体库里。')) return;
+
+  var hint = document.getElementById('low-hint');
+  hint.textContent = '处理中…';
+
+  post('/api/low-score/remove', {
+    filepaths: lowEntries.map(function (e) { return e.filepath; })
+  }).then(function (res) {
+    hint.textContent = res.j.message || res.j.error || '完成';
+    if (res.j.ok) {
+      document.getElementById('low-del').disabled = true;
+      lowEntries = [];
+      setTimeout(function () { location.reload(); }, 1200);
+    }
+  });
+}
+
+// ── 手动加入文件 ──────────────────────────────────────────
+function openImport() {
+  document.getElementById('modal-import').style.display = 'flex';
+  document.getElementById('import-hint').textContent = '';
+  document.getElementById('import-list').innerHTML = '';
+}
+
+function doImport() {
+  var path = document.getElementById('import-path').value.trim();
+  var hint = document.getElementById('import-hint');
+
+  if (!path) { hint.textContent = '先填文件夹路径'; return; }
+
+  hint.textContent = '处理中…';
+
+  post('/api/scan/import', { path: path }).then(function (res) {
+    var j = res.j;
+
+    if (!j.ok) { hint.textContent = j.error || '失败'; return; }
+
+    hint.textContent = j.message || '完成';
+
+    var html = '';
+
+    if (j.added && j.added.length) {
+      html += '<div class="modal-list-h">已加入 ' + j.added.length + ' 条</div>';
+      j.added.forEach(function (a) {
+        html += '<div class="modal-row">'
+              + '<span class="tag">' + esc(a.number) + '<i>' + a.confidence + '</i></span>'
+              + '<span class="fntxt">' + esc(a.file) + '</span></div>';
+      });
+    }
+
+    if (j.skipped && j.skipped.length) {
+      html += '<div class="modal-list-h skip">门槛挡下 ' + j.skipped.length + ' 条</div>';
+      j.skipped.forEach(function (a) {
+        html += '<div class="modal-row">'
+              + '<span class="tag miss">' + esc(a.number) + '<i>' + a.confidence + '</i></span>'
+              + '<span class="fntxt">' + esc(a.file) + '</span></div>';
+      });
+    }
+
+    if (!html) {
+      html = '<div class="modal-empty">这个文件夹里没有识别出番号</div>';
+    }
+
+    document.getElementById('import-list').innerHTML = html;
   });
 }
 </script>

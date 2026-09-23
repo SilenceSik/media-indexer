@@ -195,7 +195,9 @@ class Scanner:
     def scan(
         self,
         folder,
-        update_index=True
+        update_index=True,
+        min_size=0,
+        max_size=0
     ):
 
         """
@@ -204,6 +206,12 @@ class Scanner:
         白名单过滤放在 os.stat **之前**：非视频文件（.txt/.jpg/无扩展名）
         与未收录的格式既不进 file_index、也不做 stat —— 26,230 条语料里
         这一步省掉 60% 的 stat 与解析（被省掉的格式可信产出为 0）。
+
+        大小过滤放在 stat **之后**：挂载点与 LNK 这类 stat 会抛
+        OSError 的对象总是安全的，绝不为省一次调用把它们暴露在守卫之外。
+
+        min_size / max_size 单位字节；**0 表示该端不限制**（划到头）。
+        被大小挡下的文件不推进 file_index —— 日后调宽门槛重扫时还能进来。
 
         update_index=False → 真·干跑：只报告哪些文件「需要处理」，
         不推进 file_index（否则紧接着的真跑会因索引已推进而静默空转）。
@@ -226,9 +234,26 @@ class Scanner:
 
                     continue
 
-                stat = os.stat(
-                    path
-                )
+                # 守卫在 stat 之前：os.walk 会把挂载点/junction 当文件列出，
+                # stat 它们会抛 OSError（实测 X:\System Volume Information
+                # 目录名带空格时直接 ValueError）。不为大小过滤把这条守卫挪后。
+                try:
+
+                    stat = os.stat(
+                        path
+                    )
+
+                except (OSError, ValueError):
+
+                    continue
+
+                if min_size and stat.st_size < min_size:
+
+                    continue
+
+                if max_size and stat.st_size > max_size:
+
+                    continue
 
                 if self.index.changed(
                     path,

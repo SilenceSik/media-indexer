@@ -18,12 +18,16 @@ class FileService:
     def __init__(
         self,
         db,
-        torrent_dir
+        torrent_dir,
+        rules=None
     ):
 
         self.db = db
 
         self.torrent_dir = torrent_dir
+
+        # 番号规则：低分卡片清理要用它重放识别分数（分数不落库）
+        self.rules = rules or []
 
     # ------------------------------------------------------------ 打开目录
 
@@ -222,6 +226,114 @@ class FileService:
                 fail += 1
 
         return ok, fail, self.torrent_dir
+
+    # ------------------------------------------------------------ 低分卡片清理
+
+    def low_score_entries(self, max_score, parser=None):
+        """找出库内识别分低于 max_score 的条目。
+
+        ⚠️ 分数**不在库里存** —— media_files 没有 confidence 列。所以这里
+        按存下来的文件名重新解析一遍取分。识别是纯函数，重放结果一致。
+
+        返回 [{filepath, filename, number, confidence, score}...]，只读不删。
+        """
+
+        from core.parser_v2 import Parser
+
+        if parser is None:
+
+            parser = Parser(self.rules)
+
+        rows = self.db.conn.execute(
+            """
+            SELECT m.filepath, m.filename, t.number
+            FROM media_files m
+            JOIN titles t ON t.id = m.title_id
+            """
+        ).fetchall()
+
+        out = []
+
+        for r in rows:
+
+            # 与 scan_service.parse_file 同序：先文件名，无命中再退父目录
+            nums = parser.parse(os.path.basename(r["filepath"] or ""))
+
+            if not nums:
+
+                parent = os.path.basename(
+                    os.path.dirname(r["filepath"] or "")
+                )
+
+                if parent:
+
+                    nums = parser.parse(parent)
+
+            best = max(
+                nums,
+                key=lambda x: x.get("confidence", 0),
+            ) if nums else None
+
+            score = best["confidence"] if best else 0
+
+            if score <= max_score:
+
+                out.append(
+                    {
+                        "filepath": r["filepath"],
+                        "filename": r["filename"],
+                        "number": r["number"],
+                        "parsed": best["number"] if best else None,
+                        "confidence": score,
+                    }
+                )
+
+        out.sort(key=lambda x: x["confidence"], reverse=True)
+
+        return out
+
+    def remove_entries(self, filepaths):
+        """把指定文件**从媒体库摘除**（只删库记录，绝不碰磁盘上的文件）。
+
+        摘除后孤立无文件的 titles 一并清掉，否则标题列表里会留空壳。
+        """
+
+        removed = 0
+
+        for path in filepaths:
+
+            cur = self.db.conn.execute(
+                "DELETE FROM media_files WHERE filepath=?",
+                (path,),
+            )
+
+            removed += cur.rowcount or 0
+
+        # 清掉没有任何文件挂靠的 titles（含其后延的 metadata/magnets）
+        orphans = [
+            r[0]
+            for r in self.db.conn.execute(
+                """
+                SELECT id FROM titles
+                WHERE id NOT IN (SELECT title_id FROM media_files)
+                """
+            )
+        ]
+
+        for tid in orphans:
+
+            for table in ("metadata", "magnets"):
+
+                self.db.conn.execute(
+                    f"DELETE FROM {table} WHERE title_id=?",               # noqa: S608
+                    (tid,),
+                )
+
+            self.db.conn.execute("DELETE FROM titles WHERE id=?", (tid,))
+
+        self.db.conn.commit()
+
+        return removed, len(orphans)
 
     # ------------------------------------------------------------ 空目录
 

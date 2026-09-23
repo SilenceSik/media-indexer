@@ -91,6 +91,40 @@
         </p>
       </div>
 
+      <div class="conf-box">
+        <div class="conf-head">
+          <span>文件大小门槛</span>
+          <span class="conf-val mono" id="size-label">不限</span>
+        </div>
+
+        <div class="conf-sliders">
+          <label class="slider-row">
+            <span class="slider-name">最小</span>
+            <input type="range" id="min-size" min="0" max="9" value="0" step="1"
+                   oninput="syncSize()">
+            <span class="slider-num mono" id="min-size-val">不限</span>
+          </label>
+          <label class="slider-row">
+            <span class="slider-name">最大</span>
+            <input type="range" id="max-size" min="0" max="9" value="9" step="1"
+                   oninput="syncSize()">
+            <span class="slider-num mono" id="max-size-val">不限</span>
+          </label>
+        </div>
+
+        <div class="conf-presets">
+          <button class="chip" type="button" onclick="presetSize(0,9)">不限</button>
+          <button class="chip" type="button" onclick="presetSize(2,9)">≥300MB</button>
+          <button class="chip" type="button" onclick="presetSize(6,9)">≥3GB</button>
+          <button class="chip" type="button" onclick="presetSize(7,9)">≥5GB</button>
+        </div>
+
+        <p class="note" style="margin:0.9rem 0 0; padding-top:0; border-top:0">
+          滑块划到两端即为<strong>不限制</strong>。用来排掉预告片/片段这类小文件，
+          或只看正片。
+        </p>
+      </div>
+
       <div class="actions">
         <button class="primary" id="go" onclick="start(false)">
           <span>开始扫描</span>
@@ -174,6 +208,54 @@ function preset(lo, hi) {
   syncConf();
 }
 
+// 大小档位（MB）。两端即"不限制"：min 的 0 挡 = 不限，max 的最后挡 = 不限。
+var SIZE_STOPS = [0, 100, 300, 700, 1500, 3000, 5000, 10000, 20000, 50000];
+
+function sizeLabel(idx, isMin) {
+  var mb = SIZE_STOPS[idx];
+  if (isMin && idx === 0) { return '不限'; }
+  if (!isMin && idx === SIZE_STOPS.length - 1) { return '不限'; }
+  if (mb >= 1024) {
+    var gb = mb / 1024;
+    return (gb >= 10 ? Math.round(gb) : gb.toFixed(1).replace(/\.0$/, '')) + ' GB';
+  }
+  return mb + ' MB';
+}
+
+function syncSize() {
+  var lo = parseInt(document.getElementById('min-size').value, 10);
+  var hi = parseInt(document.getElementById('max-size').value, 10);
+
+  if (lo > hi) {
+    if (document.activeElement.id === 'min-size') {
+      document.getElementById('max-size').value = lo;
+      hi = lo;
+    } else {
+      document.getElementById('min-size').value = hi;
+      lo = hi;
+    }
+  }
+
+  var loText = sizeLabel(lo, true);
+  var hiText = sizeLabel(hi, false);
+
+  document.getElementById('min-size-val').textContent = loText;
+  document.getElementById('max-size-val').textContent = hiText;
+
+  var head;
+  if (loText === '不限' && hiText === '不限') { head = '不限'; }
+  else if (hiText === '不限') { head = '≥ ' + loText; }
+  else if (loText === '不限') { head = '≤ ' + hiText; }
+  else { head = loText + ' - ' + hiText; }
+  document.getElementById('size-label').textContent = head;
+}
+
+function presetSize(lo, hi) {
+  document.getElementById('min-size').value = lo;
+  document.getElementById('max-size').value = hi;
+  syncSize();
+}
+
 function start(enrich) {
   var path = document.getElementById('path').value.trim();
   var dry = document.getElementById('dry').checked;
@@ -181,6 +263,14 @@ function start(enrich) {
 
   var minConf = parseInt(document.getElementById('min-conf').value, 10);
   var maxConf = parseInt(document.getElementById('max-conf').value, 10);
+
+  var minSizeIdx = parseInt(document.getElementById('min-size').value, 10);
+  var maxSizeIdx = parseInt(document.getElementById('max-size').value, 10);
+
+  // 划到头 = 0（后端约定 0 表示该端不限制）
+  var minSize = (minSizeIdx === 0) ? 0 : SIZE_STOPS[minSizeIdx] * 1024 * 1024;
+  var maxSize = (maxSizeIdx === SIZE_STOPS.length - 1)
+    ? 0 : SIZE_STOPS[maxSizeIdx] * 1024 * 1024;
 
   if (!path) { hint.textContent = '先填目录'; return; }
 
@@ -199,7 +289,8 @@ function start(enrich) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       path: path, dry_run: dry, enrich: enrich,
-      min_conf: minConf, max_conf: maxConf
+      min_conf: minConf, max_conf: maxConf,
+      min_size: minSize, max_size: maxSize
     })
   })
   .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })

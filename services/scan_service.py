@@ -43,7 +43,9 @@ class ScanService:
         folder,
         persist=True,
         min_conf=0,
-        max_conf=100
+        max_conf=100,
+        min_size=0,
+        max_size=0
     ):
 
         """
@@ -54,18 +56,22 @@ class ScanService:
           persist=True 仍能看到这批文件并落库
         - 不会出现「先干跑一眼，再真跑就静默空转」的陷阱
 
-        min_conf / max_conf 是**落库门槛**：只有 confidence 落在区间内的
-        候选才写库。默认 0-100 即「全都收」，行为与加这个参数之前一致。
+        min_conf / max_conf 是**置信度门槛**：只有 confidence 落在区间内的
+        候选才写库。默认 0-100 即「全都收」。
 
         为什么需要它：识别规则是启发式的，`kcf9.com-3 (1)_(new)_amq13.mp4`
         会被 `P_STD` 当成 `AMQ-13`（conf 70，厂牌未收录）。没有门槛时
-        这类猜测照样入库，用户看到的就是"错误匹配"。设 min_conf=90 就
-        只剩可信档，设成 70-70 则专门捞出这类待人工确认的条目。
+        这类猜测照样入库，用户看到的就是"错误匹配"。
+
+        min_size / max_size 是**文件大小门槛**（字节，0 = 不限制）。
+        用来排掉预告片/花絮这类小文件，或只看正片。
         """
 
         files = self.scanner.scan(
             folder,
-            update_index=persist
+            update_index=persist,
+            min_size=min_size,
+            max_size=max_size,
         )
 
         results = []

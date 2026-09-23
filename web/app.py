@@ -183,8 +183,22 @@ os.makedirs(
 )
 
 
+def load_rules():
+    """读番号规则（低分清理要重放识别分数）。"""
+
+    try:
+
+        return json.load(
+            open(resolve_path(CONFIG["dictionary"]), encoding="utf-8")
+        )["rules"]
+
+    except Exception:                                           # noqa: BLE001
+
+        return []
+
+
 def build_file_service():
-    """文件操作服务（打开/删除/存种子/空目录）。"""
+    """文件操作服务（打开/删除/存种子/空目录/低分清理）。"""
 
     from core.database_v2 import Database
 
@@ -192,7 +206,8 @@ def build_file_service():
 
     return FileService(
         Database(DB_PATH),
-        TORRENT_DIR
+        TORRENT_DIR,
+        rules=load_rules(),
     )
 
 
@@ -749,7 +764,8 @@ _SCAN_JOB = {
 }
 
 
-def _reset_job(path, dry_run, enrich=False, min_conf=0, max_conf=100):
+def _reset_job(path, dry_run, enrich=False, min_conf=0, max_conf=100,
+               min_size=0, max_size=0):
 
     # 新一轮任务：清掉上一轮的停止/暂停状态
     _SCAN_STOP.clear()
@@ -774,6 +790,8 @@ def _reset_job(path, dry_run, enrich=False, min_conf=0, max_conf=100):
             "enrich_ambiguous": 0,
             "min_conf": min_conf,
             "max_conf": max_conf,
+            "min_size": min_size,
+            "max_size": max_size,
             "skipped_count": 0,
             "skipped_samples": [],
             "unrecognized": [],
@@ -807,7 +825,8 @@ def _gate():
     return True
 
 
-def _run_scan(path, dry_run, enrich=False, min_conf=0, max_conf=100):
+def _run_scan(path, dry_run, enrich=False, min_conf=0, max_conf=100,
+              min_size=0, max_size=0):
     """后台线程体：扫描；enrich=True 时紧接着抓元数据/磁力/封面截图。"""
 
     try:
@@ -859,6 +878,8 @@ def _run_scan(path, dry_run, enrich=False, min_conf=0, max_conf=100):
             persist=not dry_run,
             min_conf=min_conf,
             max_conf=max_conf,
+            min_size=min_size,
+            max_size=max_size,
         )
 
         rows = result["data"]
@@ -1053,6 +1074,25 @@ async def scan_start(request: Request):
 
         min_conf, max_conf = max_conf, min_conf
 
+    def _size(key):
+
+        try:
+
+            return max(0, int(payload.get(key, 0) or 0))
+
+        except (TypeError, ValueError):
+
+            return 0
+
+    # 0 = 该端不限制（滑块划到头）
+    min_size = _size("min_size")
+
+    max_size = _size("max_size")
+
+    if min_size and max_size and min_size > max_size:
+
+        min_size, max_size = max_size, min_size
+
     if not path:
 
         return JSONResponse(
@@ -1076,11 +1116,11 @@ async def scan_start(request: Request):
                 status_code=409,
             )
 
-        _reset_job(path, dry_run, enrich, min_conf, max_conf)
+        _reset_job(path, dry_run, enrich, min_conf, max_conf, min_size, max_size)
 
     threading.Thread(
         target=_run_scan,
-        args=(path, dry_run, enrich, min_conf, max_conf),
+        args=(path, dry_run, enrich, min_conf, max_conf, min_size, max_size),
         daemon=True,
     ).start()
 
@@ -1462,6 +1502,185 @@ async def api_empty_dirs_delete(request: Request):
         "ok": not failed,
         "deleted": ok_count,
         "failed": failed,
+    }
+
+
+# ── 低分卡片清理 ────────────────────────────────────────────
+
+
+@app.get("/api/low-score")
+def api_low_score(max_score: int = 79):
+    """列出识别分 <= max_score 的库内条目（只读）。
+
+    分数不落库，按文件名重放识别得出 —— 所以这是"当前规则下的分数"。
+    """
+
+    svc = build_file_service()
+
+    entries = svc.low_score_entries(max_score)
+
+    # 分数分布：让用户看着分布决定阈值，而不是盲删。
+    # 70 分档里混着"厂牌未收录的真番号"（ACC-006 / AMBI-128 这类），
+    # 只看条数容易一刀切误伤。
+    dist = {}
+
+    for e in entries:
+
+        key = str(e["confidence"])
+
+        dist[key] = dist.get(key, 0) + 1
+
+    return {
+        "ok": True,
+        "max_score": max_score,
+        "count": len(entries),
+        "distribution": dist,
+        "entries": entries[:300],
+    }
+
+
+@app.post("/api/low-score/remove")
+async def api_low_score_remove(request: Request):
+    """把指定条目**从媒体库摘除**。
+
+    ⚠️ 只删库记录，**磁盘上的文件不动** —— 这是"清理卡片"不是"删片"。
+    真要删文件走卡片上的删除按钮（那条路有磁力门控 + 回收站）。
+    """
+
+    payload = await request.json()
+
+    paths = payload.get("filepaths") or []
+
+    if not paths:
+
+        return JSONResponse(
+            {"ok": False, "error": "没有要清理的条目"},
+            status_code=400,
+        )
+
+    svc = build_file_service()
+
+    removed, orphans = svc.remove_entries(paths)
+
+    return {
+        "ok": True,
+        "removed": removed,
+        "orphan_titles": orphans,
+        "message": f"已从库中摘除 {removed} 条记录"
+                   + (f"，清理空标题 {orphans} 个" if orphans else "")
+                   + "（磁盘文件未动）",
+    }
+
+
+# ── 手动从文件夹加入媒体库 ──────────────────────────────────
+
+
+@app.post("/api/scan/import")
+async def api_scan_import(request: Request):
+    """手动指定一个文件夹，识别其中的番号并加入库（不进后台任务队列）。
+
+    与 /api/scan/start 的区别：这是**同步**的、单目录、面向"我就想加这几个
+    文件"的场景，结果直接返回，前端即时显示。批量扫描仍走 /api/scan/start。
+    """
+
+    payload = await request.json()
+
+    path = (payload.get("path") or "").strip()
+
+    if not path:
+
+        return JSONResponse(
+            {"ok": False, "error": "请填写文件夹路径"},
+            status_code=400,
+        )
+
+    if not os.path.isdir(path):
+
+        return JSONResponse(
+            {"ok": False, "error": f"目录不存在：{path}"},
+            status_code=400,
+        )
+
+    try:
+
+        min_conf = int(payload.get("min_conf", 0) or 0)
+
+        max_conf = int(payload.get("max_conf", 100) if payload.get("max_conf") is not None else 100)
+
+    except (TypeError, ValueError):
+
+        min_conf, max_conf = 0, 100
+
+    min_conf = max(0, min(min_conf, 100))
+
+    max_conf = max(0, min(max_conf, 100))
+
+    if min_conf > max_conf:
+
+        min_conf, max_conf = max_conf, min_conf
+
+    from core.database_v2 import Database
+
+    from services.scan_service import ScanService
+
+    try:
+
+        service = ScanService(
+            resolve_path(CONFIG.get("index_db") or "storage/file_index_v2.db"),
+            load_rules(),
+            db=Database(DB_PATH),
+            extensions=CONFIG.get("video_extensions") or [],
+            excluded_segments=CONFIG.get("excluded_dir_segments") or [],
+        )
+
+        result = service.scan(
+            path,
+            persist=True,
+            min_conf=min_conf,
+            max_conf=max_conf,
+        )
+
+    except Exception as exc:                                    # noqa: BLE001
+
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=500,
+        )
+
+    rows = result["data"]
+
+    added = []
+    skipped = []
+
+    for row in rows:
+
+        if row["persisted"]:
+
+            added.append(
+                {
+                    "file": os.path.basename(row["file"]),
+                    "number": row["numbers"][0]["number"] if row["numbers"] else "",
+                    "confidence": row["numbers"][0]["confidence"] if row["numbers"] else 0,
+                }
+            )
+
+        elif row.get("skipped"):
+
+            skipped.append(
+                {
+                    "file": os.path.basename(row["file"]),
+                    "number": row["skipped"]["number"],
+                    "confidence": row["skipped"]["confidence"],
+                }
+            )
+
+    return {
+        "ok": True,
+        "path": path,
+        "added": added,
+        "skipped": skipped,
+        "message": f"加入 {len(added)} 条"
+                   + (f"，置信度门槛挡下 {len(skipped)} 条" if skipped else ""),
     }
 
 

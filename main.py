@@ -112,6 +112,22 @@ def parse_args(argv=None):
         help="落库的最高置信度（0-100，默认 100 = 不设上限）",
     )
 
+    parser.add_argument(
+        "--min-size",
+        type=float,
+        default=0,
+        metavar="MB",
+        help="最小文件大小（MB，默认 0 = 不限制）",
+    )
+
+    parser.add_argument(
+        "--max-size",
+        type=float,
+        default=0,
+        metavar="MB",
+        help="最大文件大小（MB，默认 0 = 不限制）",
+    )
+
     return parser.parse_args(argv)
 
 
@@ -187,6 +203,25 @@ def main(argv=None):
 
         print(f"落库置信度门槛：{args.min_conf} - {args.max_conf}")
 
+    if args.min_size or args.max_size:
+
+        parts = []
+
+        if args.min_size:
+
+            parts.append(f"≥ {args.min_size:g} MB")
+
+        if args.max_size:
+
+            parts.append(f"≤ {args.max_size:g} MB")
+
+        print(f"文件大小门槛：{' 且 '.join(parts)}")
+
+    # 命令行用 MB，内核用字节
+    min_size_bytes = int(args.min_size * 1024 * 1024)
+
+    max_size_bytes = int(args.max_size * 1024 * 1024)
+
     for path in targets:
 
         if not os.path.isdir(path):
@@ -202,6 +237,8 @@ def main(argv=None):
             persist=not args.dry_run,
             min_conf=args.min_conf,
             max_conf=args.max_conf,
+            min_size=min_size_bytes,
+            max_size=max_size_bytes,
         )
 
         rows = result["data"]
