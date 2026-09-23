@@ -906,7 +906,10 @@ def _run_scan(path, dry_run, enrich=False):
 
                     with _SCAN_LOCK:
 
+                        # 同批量抓取路径：停止时清掉 paused，避免两个互斥状态并存
                         _SCAN_JOB["stopped"] = True
+
+                        _SCAN_JOB["paused"] = False
 
                     break
 
@@ -1037,6 +1040,9 @@ def scan_stop():
         _SCAN_STOP.set()
 
         _SCAN_PAUSE.clear()
+
+        # 停止是终态：清掉暂停标记，界面不该同时显示「已暂停」和「已停止」
+        _SCAN_JOB["paused"] = False
 
     return {"ok": True, "message": "已请求停止，会在当前条目跑完后停下"}
 
@@ -1258,7 +1264,11 @@ def api_enrich_all(request: Request):
 
                     with _SCAN_LOCK:
 
+                        # 收到停止时必须清掉 paused，否则界面会同时显示
+                        # 「已暂停」和「已停止」两个互斥状态（实测遇到过）。
                         _SCAN_JOB["stopped"] = True
+
+                        _SCAN_JOB["paused"] = False
 
                     break
 

@@ -331,6 +331,91 @@ def test_pause_resume_toggles_flag():
         web_app._SCAN_STOP.clear()
 
 
+def test_stop_clears_paused_flag():
+    """停止时不得残留 paused —— 否则界面同时显示「已暂停」和「已停止」。
+
+    实测遇到过这个并存态（上一轮任务停下来后 paused=True 还在）。
+    """
+
+    web_app._SCAN_PAUSE.set()
+
+    with web_app._SCAN_LOCK:
+
+        web_app._SCAN_JOB["running"] = True
+
+        web_app._SCAN_JOB["paused"] = True
+
+    try:
+
+        assert web_app.scan_stop()["ok"] is True
+
+        with web_app._SCAN_LOCK:
+
+            assert web_app._SCAN_JOB["paused"] is False, "停止后不该还是暂停态"
+
+        assert web_app._SCAN_PAUSE.is_set() is False
+
+    finally:
+
+        with web_app._SCAN_LOCK:
+
+            web_app._SCAN_JOB["running"] = False
+
+        web_app._SCAN_PAUSE.clear()
+
+        web_app._SCAN_STOP.clear()
+
+
+def test_gate_stops_even_when_paused():
+    """暂停状态下发停止，_gate 必须返回 False（不能停在暂停里出不来）。"""
+
+    web_app._SCAN_PAUSE.set()
+
+    web_app._SCAN_STOP.set()
+
+    try:
+
+        assert web_app._gate() is False
+
+    finally:
+
+        web_app._SCAN_PAUSE.clear()
+
+        web_app._SCAN_STOP.clear()
+
+
+def test_gate_blocks_while_paused():
+    """暂停且未停止时 _gate 会阻塞（这里只验证它不返回 False 的语义）。
+
+    用线程跑，因为 _gate 在暂停时会一直等（设计如此）。
+    """
+
+    import threading
+
+    web_app._SCAN_PAUSE.set()
+
+    outcome = {}
+
+    def worker():
+
+        outcome["result"] = web_app._gate()
+
+    t = threading.Thread(target=worker, daemon=True)
+
+    t.start()
+
+    t.join(timeout=1.0)
+
+    assert t.is_alive(), "暂停时 _gate 应阻塞，不该立刻返回"
+
+    # 解除暂停让它收尾
+    web_app._SCAN_PAUSE.clear()
+
+    t.join(timeout=2.0)
+
+    assert outcome.get("result") is True
+
+
 def test_reset_job_clears_stale_control_flags():
     """新任务必须清掉上一轮的停止/暂停标志，否则新任务一启动就停。"""
 
