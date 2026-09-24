@@ -347,15 +347,51 @@ def test_enrich_does_not_drop_when_probe_fails(tmp_path, monkeypatch):
     ).fetchone()[0] == 1, "没数据不该杀"
 
 
-# ═══════════════════════ 真数据回归（有库才跑）
+# ═══════════════════════ 真数据回归（有语料才跑）
 
-_REAL_DB = os.path.join(
+_REAL_DB = os.environ.get("LMM_REAL_DB") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "storage", "library_v2.db",
 )
 
+# 本测试的期望值是**照我们那份语料**写死的（IPX-951 / DSVR-219 …）。
+# 所以不能只查「库文件存在」就开跑 —— 公开仓的工作树里 `storage/` 可能
+# 留着测试自己生成的**空库**（gitignored、但有文件），那时断言必然误红。
+# 判据改成「库里有本测试引用的样本」，不是「文件存在」。
+_NEEDED_SPECIMEN = "IPX-951"
 
-@pytest.mark.skipif(not os.path.exists(_REAL_DB), reason="没有真实库")
+
+def _has_expected_corpus(path):
+    if not path or not os.path.exists(path):
+        return False
+
+    import sqlite3
+
+    try:
+
+        conn = sqlite3.connect(path)
+
+        n = conn.execute("SELECT COUNT(*) FROM titles").fetchone()[0]
+
+        has = conn.execute(
+            "SELECT COUNT(*) FROM titles WHERE number = ?",
+            (_NEEDED_SPECIMEN,),
+        ).fetchone()[0]
+
+        conn.close()
+
+        return n >= 100 and has > 0
+
+    except Exception:                                           # noqa: BLE001
+
+        return False
+
+
+@pytest.mark.skipif(
+    not _has_expected_corpus(_REAL_DB),
+    reason="本机没有本测试所依据的语料（需含 {}；可用 LMM_REAL_DB 指定）"
+           .format(_NEEDED_SPECIMEN),
+)
 def test_real_library_flags_only_known_mismatches():
     """拿真实库跑一遍：**只**该杀那两个实测的误匹配。
 
