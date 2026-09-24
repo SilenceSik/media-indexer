@@ -1876,3 +1876,101 @@ a.card:focus-visible {
   font-family: var(--mono);
   font-size: 0.8rem;
 }
+
+/* ── 弹窗里的三列表格（合计 + 番号清单）───────────────────
+   为什么要 grid 而不是 flex：flex 下 `flex:1` 的番号会把徽章推到最右，
+   而长番号（FC2-PPV-3141813）换行时会把徽章挤到**下一行**，各行的
+   数字右边缘对不成一条竖线。改成固定列宽后：番号列可省略号截断、
+   两个数字列右对齐，长番号不再影响行结构。 */
+.brow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.2rem 5.4rem;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 0.8rem;
+}
+
+.brow > span {
+  min-width: 0;
+}
+
+/* 数字列：等宽 + 右对齐，这样各行右边缘齐平 */
+.brow > span:nth-child(2),
+.brow > span:nth-child(3) {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  text-align: right;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+/* 番号列：长番号省略号截断（title 里有全称可悬停看） */
+.brow .num {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brow.bhead {
+  color: var(--fg-faint);
+  font-size: 0.7rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.brow.bhead > span:nth-child(2),
+.brow.bhead > span:nth-child(3) {
+  color: var(--fg-faint);
+}
+
+/* 合计行：与列表同列宽，数值高亮 */
+.brow.btotal {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.2rem;
+}
+
+.brow.btotal > span {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+/* 提示行独立成行，别挤在按钮后面（原来和「取消」挨在一起，像按钮的一部分） */
+.batch-hintline {
+  margin: 0.6rem 0 0.9rem;
+  min-height: 1.2em;
+}
+
+/* 弹窗底部留白，避免内容贴边被裁 */
+.modal-card {
+  padding-bottom: 2rem;
+}
+
+.modal-list {
+  padding-bottom: 0.25rem;
+}
+
+/* ── 固定头/按钮、只让清单滚动 ────────────────────────────
+   默认 .modal-card 是「整卡滚动」——60 行清单会把「确认送回收站」
+   按钮顶出视野，用户看到一半要确认时反而找不到按钮。
+   这张卡改成列向 flex：头与按钮不滚，只有清单区滚。 */
+.modal-card.modal-fixed {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;         /* 由内部清单自己滚 */
+}
+
+.modal-card.modal-fixed .modal-note,
+.modal-card.modal-fixed .modal-head,
+.modal-card.modal-fixed .modal-actions,
+.modal-card.modal-fixed .batch-hintline {
+  flex: 0 0 auto;
+}
+
+.modal-card.modal-fixed #batch-list {
+  flex: 1 1 auto;
+  min-height: 0;            /* 关键：不加这行 flex 子项不会收缩，滚动失效 */
+  overflow-y: auto;
+  margin-top: 0.2rem;
+  padding-right: 0.35rem;   /* 给滚动条留位，别压住数字列 */
+}

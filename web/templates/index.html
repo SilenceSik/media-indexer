@@ -267,7 +267,10 @@
 
   <!-- 高置信一键送回收站 -->
   <div class="modal" id="modal-batch" style="display:none">
-    <div class="modal-card">
+    {# 这张卡用 modal-fixed：头/按钮固定，只有清单滚动 ——
+       否则 60 行会把「确认送回收站」按钮顶出视野，
+       确认前反而找不到按钮。 #}
+    <div class="modal-card modal-fixed">
       <div class="modal-head">
         <h3>送回收站（高置信）</h3>
         <button class="x" onclick="closeModal('modal-batch')">×</button>
@@ -289,8 +292,9 @@
           确认送回收站
         </button>
         <button class="ghost" onclick="closeModal('modal-batch')">取消</button>
-        <span class="hint" id="batch-hint"></span>
       </div>
+
+      <p class="hint batch-hintline" id="batch-hint"></p>
 
       <div id="batch-list" class="modal-list"></div>
     </div>
@@ -658,19 +662,20 @@ function openBatchModal() {
         return;
       }
 
-      // 大字汇总：这是「确认前要看清」的核心信息
-      var html = '<div class="modal-row batch-total">'
-               + '<span class="fntxt">合计</span>'
-               + '<span class="tag">' + j.count + ' 部</span>'
-               + '<span class="tag">' + j.files + ' 个文件</span>'
-               + '<span class="tag">' + esc(j.bytes_h) + '</span></div>'
-               + '<div class="modal-list-h">将送回收站的番号（按占用从大到小）</div>';
+      // 合计行与下面的列表**共用同一套列宽**，数字才能对成一条竖线
+      var html = '<div class="brow bhead">'
+               + '<span>番号</span><span>文件</span><span>占用</span></div>'
+               + '<div class="brow btotal">'
+               + '<span class="num">合计 ' + j.count + ' 部</span>'
+               + '<span>' + j.files + ' 个</span>'
+               + '<span>' + esc(j.bytes_h) + '</span></div>';
 
       j.titles.slice(0, 60).forEach(function (t) {
-        html += '<div class="modal-row">'
-              + '<span class="fntxt">' + esc(t.number) + '</span>'
-              + '<span class="tag">' + t.files + ' 个</span>'
-              + '<span class="tag">' + esc(t.bytes_h) + '</span></div>';
+        html += '<div class="brow">'
+              + '<span class="num" title="' + esc(t.number) + '">'
+              + esc(t.number) + '</span>'
+              + '<span>' + t.files + ' 个</span>'
+              + '<span>' + esc(t.bytes_h) + '</span></div>';
       });
 
       if (j.titles.length > 60) {
