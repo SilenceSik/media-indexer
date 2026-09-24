@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>维护</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="aurora"></div>
+<div class="grain"></div>
+
+<div class="wrap">
+
+  <nav class="nav">
+    <span class="brand"><span class="dot"></span>媒体库</span>
+    <div class="nav-links">
+      <a href="/">全部</a>
+      <a href="/?favorite=1">收藏</a>
+      <a href="/?has_magnet=1">有磁力</a>
+      <a href="/?missing_meta=1">缺元数据</a>
+      <a href="/scan">扫描</a>
+      <a href="/maintenance" class="on">维护</a>
+      <a href="/settings">设置</a>
+    </div>
+    <form class="search" action="/search" method="get">
+      <input name="q" placeholder="搜索番号" autocomplete="off">
+      <button type="submit">搜索</button>
+    </form>
+  </nav>
+
+  <header class="hero" style="grid-template-columns:1fr; margin-bottom:2.5rem">
+    <div>
+      <h1>维护</h1>
+      <p>
+        备份、导出、清理与日志 —— 平时不常动的东西都收在这里，
+        首页只留日常要按的那几个按钮。
+      </p>
+    </div>
+  </header>
+
+  <!-- ══════════ 数据备份 ══════════ -->
+  <p class="section-h">数据备份</p>
+
+  <div class="panel">
+    <p class="field-hint" style="margin-top:0">
+      导出把整个库（数据库 + 封面 + 截图 + 磁力文本档）打成压缩包，
+      用于备份或搬到另一台机器。导入是<strong>合并</strong>：
+      同番号不重复建、同路径不重复加，导入前会<strong>自动备份现有库</strong>。
+    </p>
+
+    <div class="tool-row">
+      <button class="ghost" onclick="openBackup()">导出 / 导入媒体库</button>
+      <span class="hint" id="bk-inline-hint"></span>
+    </div>
+  </div>
+
+  <!-- ══════════ 内容维护 ══════════ -->
+  <p class="section-h">内容维护</p>
+
+  <div class="panel">
+    <div class="tool-row">
+      <button class="ghost" onclick="saveAllTorrents()">导出全部磁力</button>
+      <button class="ghost" onclick="openLowScore()">清理低分卡片</button>
+      <button class="ghost" onclick="openImport()">手动加入文件</button>
+      <span class="hint" id="bar-hint"></span>
+    </div>
+    <p class="field-hint">
+      <strong>导出全部磁力</strong>：把库里每个番号的磁力写成文本档存到种子目录（留底用）。<br>
+      <strong>清理低分卡片</strong>：按当前识别规则重算分，摘除 ≤ 阈值的条目
+      —— <strong>只从库里摘除记录，磁盘文件不动</strong>。<br>
+      <strong>手动加入文件</strong>：指定一个文件夹，识别其中番号并立即入库。
+    </p>
+  </div>
+
+  <!-- ══════════ 日志（折叠）══════════ -->
+  <p class="section-h">日志</p>
+
+  <div class="panel">
+    <details class="fold">
+      <summary>扫描筛选日志<span class="fold-note">被挡下的文件与原因</span></summary>
+
+      <p class="field-hint" style="margin-top:0.9rem">
+        扫描时被门槛挡下的文件都记在这里 ——
+        「扫到了却没进库」时，先来这儿看是被门槛挡的、还是压根没识别出番号。
+      </p>
+
+      <div class="tool-row">
+        <button class="ghost" onclick="loadFilterLog()">加载</button>
+        <a class="tag" href="/api/filter-log/export?limit=20000">导出 CSV</a>
+        <a class="tag" href="/logs">打开完整页</a>
+        <span class="hint" id="log-hint"></span>
+      </div>
+
+      <div id="log-summary" class="log-summary"></div>
+      <div id="log-list" class="modal-list"></div>
+    </details>
+
+    <details class="fold">
+      <summary>空目录清理<span class="fold-note">整棵子树一个文件都没有的目录</span></summary>
+
+      <p class="field-hint" style="margin-top:0.9rem">
+        找出「整棵子树一个文件都没有」的目录。先扫后删，删除走回收站。
+      </p>
+
+      {# 必须让用户自己指定目录 —— 不能默认拿 config.yaml 的 scan_paths，
+         那些通常是整个盘符，遍历代价极大，还可能碰到有坏道的盘。 #}
+      <label class="field" style="margin-top:0.9rem">
+        <span class="field-label">要扫描的目录</span>
+        <div class="picker">
+          <input id="ed-roots" placeholder="点右侧按钮选择目录" readonly>
+          <button class="ghost" type="button"
+                  onclick="pickEmptyRoots()">选择目录…</button>
+        </div>
+      </label>
+
+      <p class="field-hint" style="margin-top:-0.6rem">
+        多个目录用 <code>|</code> 分隔。为避免误扫整盘，这里<strong>不会</strong>
+        默认使用 <code>config.yaml</code> 的扫描路径。
+      </p>
+
+      <div class="tool-row">
+        <button class="ghost" onclick="loadEmptyDirs()">扫描空目录</button>
+        <span class="hint" id="ed-hint"></span>
+      </div>
+
+      <div id="ed-list" class="modal-list"></div>
+    </details>
+  </div>
+
+</div>
+
+<!-- ══════════ 弹窗：导出 / 导入 ══════════ -->
+<div class="modal" id="modal-backup" style="display:none" onclick="backdropClose(event,'modal-backup')">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>导出 / 导入媒体库</h3>
+      <button class="x" onclick="closeModal('modal-backup')">×</button>
+    </div>
+
+    <p class="modal-note">
+      导出把整个库（数据库 + 封面 + 截图 + 磁力文本档）打成压缩包，
+      用于备份或搬到另一台机器。
+    </p>
+
+    <label class="check">
+      <input type="checkbox" id="bk-images" checked>
+      <span>包含素材（封面 + 截图）</span>
+    </label>
+
+    <p class="modal-note" style="margin-top:-0.5rem">
+      素材通常占大头（实测截图 276MB vs 数据库 1.5MB）。
+      只要库和元数据时可以不勾。
+    </p>
+
+    <div class="modal-actions">
+      <button class="primary" onclick="doExport()">
+        <span>导出压缩包</span>
+        <span class="arrow">→</span>
+      </button>
+      <span class="hint" id="bk-hint"></span>
+    </div>
+
+    <div id="bk-result" class="modal-list"></div>
+
+    <div class="modal-sep"></div>
+
+    <p class="modal-note">
+      <strong>导入</strong>：选一个本工具导出的 .zip（或上传），合并进当前库。
+    </p>
+
+    <div class="modal-actions">
+      <button class="ghost" onclick="pickImportFile()">选择压缩包…</button>
+      <input type="file" id="bk-file" accept=".zip" style="display:none" onchange="doImportArchive()">
+      <span class="hint" id="bk-imp-hint"></span>
+    </div>
+
+    <div id="bk-imp-result" class="modal-list"></div>
+  </div>
+</div>
+
+<!-- ══════════ 弹窗：清理低分 ══════════ -->
+<div class="modal" id="modal-low" style="display:none" onclick="backdropClose(event,'modal-low')">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>清理低分卡片</h3>
+      <button class="x" onclick="closeModal('modal-low')">×</button>
+    </div>
+
+    <p class="modal-note">
+      按当前识别规则重新算分，列出 <strong>≤ 阈值</strong> 的库内条目。
+      清理是<strong>只从库里摘除记录，磁盘文件不动</strong>；
+      真要删文件请用卡片上的「删除」按钮（那条路有磁力门控 + 回收站）。
+    </p>
+
+    <p class="modal-note">
+      <strong>0 分</strong>要特别注意：那是<strong>当前规则已经识别不出</strong>的条目 ——
+      多半是早期规则宽松时入库的假阳性。
+      <strong>70 分</strong>则是「厂牌未收录」的低置信猜测，里面可能混着真番号，
+      建议先看下面的分布和列表再决定。
+    </p>
+
+    <div class="slider-row" style="grid-template-columns:2.6rem 1fr 2.6rem">
+      <span class="slider-name">阈值</span>
+      <input type="range" id="low-score" min="0" max="100" value="79" step="1"
+             oninput="lowScoreChanged()">
+      <span class="slider-num mono" id="low-score-val">79</span>
+    </div>
+
+    <div class="modal-actions">
+      <button class="ghost" onclick="previewLowScore()">预览</button>
+      <button class="ghost danger" id="low-del" onclick="removeLowScore()" disabled>
+        从库中摘除
+      </button>
+      <span class="hint" id="low-hint"></span>
+    </div>
+
+    <div id="low-list" class="modal-list"></div>
+  </div>
+</div>
+
+<!-- ══════════ 弹窗：手动加入 ══════════ -->
+<div class="modal" id="modal-import" style="display:none" onclick="backdropClose(event,'modal-import')">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>手动加入文件</h3>
+      <button class="x" onclick="closeModal('modal-import')">×</button>
+    </div>
+
+    <p class="modal-note">
+      指定一个文件夹，识别其中的番号并立即加入库。适合「我就想加这几个文件」。
+      批量扫描请走「扫描并抓取」。
+    </p>
+
+    <label class="field">
+      <span class="field-label">文件夹</span>
+      <div class="picker">
+        <input id="import-path" placeholder="点右侧按钮选择文件夹" readonly>
+        <button class="ghost" type="button" onclick="pickFolder('import-path','import-hint')">
+          选择文件夹…
+        </button>
+      </div>
+    </label>
+
+    <div class="modal-actions">
+      <button class="primary" onclick="doImport()">
+        <span>加入媒体库</span>
+        <span class="arrow">→</span>
+      </button>
+      <span class="hint" id="import-hint"></span>
+    </div>
+
+    <div id="import-list" class="modal-list"></div>
+  </div>
+</div>
+
+<script src="/static/common.js"></script>
+<script>
+// ═══════════════════════ 从 index.html 搬过来的（逻辑未改）
+var lowEntries = [];
+
+var pickLock = false;
+
+function saveAllTorrents() {
+  post('/api/torrents/export-all').then(function (res) {
+    alert(res.j.message || JSON.stringify(res.j));
+  });
+}
+
+function openBackup() {
+  document.getElementById('modal-backup').style.display = 'flex';
+  loadBackupList();
+}
+
+function loadBackupList() {
+  fetch('/api/backup/list').then(function (r) { return r.json(); }).then(function (j) {
+    var box = document.getElementById('bk-result');
+    if (!j.files || !j.files.length) {
+      box.innerHTML = '<div class="modal-empty">还没有导出过压缩包</div>';
+      return;
+    }
+
+    var html = '<div class="modal-list-h">已导出的包（' + esc(j.dir) + '）</div>';
+    j.files.forEach(function (f) {
+      html += '<div class="modal-row">'
+            + '<span class="tag">' + esc(f.size_h) + '</span>'
+            + '<span class="fntxt">' + esc(f.name) + '</span>'
+            + '<a class="tag" href="/api/backup/download/' + encodeURIComponent(f.name)
+            + '" download>下载</a>'
+            + '</div>';
+    });
+    box.innerHTML = html;
+  });
+}
+
+function doExport() {
+  var inc = document.getElementById('bk-images').checked;
+  var hint = document.getElementById('bk-hint');
+  hint.textContent = '打包中…（素材大时较慢）';
+
+  post('/api/backup/export', { include_images: inc }).then(function (res) {
+    if (!res.j.ok) { hint.textContent = res.j.error || '启动失败'; return; }
+    pollExport();
+  });
+}
+
+function pollExport() {
+  fetch('/api/scan/status').then(function (r) { return r.json(); }).then(function (job) {
+    var hint = document.getElementById('bk-hint');
+
+    if (job.error) { hint.textContent = '失败：' + job.error; return; }
+
+    if (job.running && job.phase === 'export') {
+      hint.textContent = '打包中…';
+      setTimeout(pollExport, 800);
+      return;
+    }
+
+    if (job.export_result) {
+      var e = job.export_result;
+      hint.textContent = '完成：' + e.name;
+      loadBackupList();
+    } else {
+      hint.textContent = '';
+    }
+  });
+}
+
+function pickImportFile() {
+  document.getElementById('bk-file').click();
+}
+
+function doImportArchive() {
+  var input = document.getElementById('bk-file');
+  var hint = document.getElementById('bk-imp-hint');
+
+  if (!input.files || !input.files.length) return;
+
+  var f = input.files[0];
+
+  if (!confirm('导入「' + f.name + '」并合并进当前库？\n\n'
+             + '导入前会自动备份现有库。')) {
+    input.value = '';
+    return;
+  }
+
+  hint.textContent = '上传中…';
+
+  var fd = new FormData();
+  fd.append('file', f);
+  fd.append('include_images', document.getElementById('bk-images').checked ? '1' : '0');
+
+  fetch('/api/backup/import', { method: 'POST', body: fd })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      input.value = '';
+
+      if (!j.ok) { hint.textContent = j.error || '导入失败'; return; }
+
+      hint.textContent = j.message || '完成';
+
+      var s = j.stats || {};
+      var html = '<div class="modal-list-h">导入结果</div>'
+               + '<div class="modal-row"><span class="fntxt">新增番号</span>'
+               + '<span class="tag">' + (s.titles_added || 0) + '</span></div>'
+               + '<div class="modal-row"><span class="fntxt">新增文件</span>'
+               + '<span class="tag">' + (s.files_added || 0) + '</span></div>'
+               + '<div class="modal-row"><span class="fntxt">新增磁力</span>'
+               + '<span class="tag">' + (s.magnets_added || 0) + '</span></div>'
+               + '<div class="modal-row"><span class="fntxt">封面 / 截图</span>'
+               + '<span class="tag">' + (s.covers || 0) + ' / ' + (s.screenshots || 0) + '</span></div>';
+
+      if (s.backup) {
+        html += '<div class="modal-list-h">导入前的库已备份到</div>'
+              + '<div class="modal-row"><span class="fntxt">' + esc(s.backup) + '</span></div>';
+      }
+
+      document.getElementById('bk-imp-result').innerHTML = html;
+    })
+    .catch(function (e) { hint.textContent = '上传失败：' + e; });
+}
+
+
+function openLowScore() {
+  document.getElementById('modal-low').style.display = 'flex';
+  document.getElementById('low-hint').textContent = '';
+  previewLowScore();
+}
+
+function lowScoreChanged() {
+  document.getElementById('low-score-val').textContent =
+    document.getElementById('low-score').value;
+  document.getElementById('low-del').disabled = true;
+  document.getElementById('low-list').innerHTML = '';
+  lowEntries = [];
+}
+
+function previewLowScore() {
+  var score = document.getElementById('low-score').value;
+  var hint = document.getElementById('low-hint');
+  hint.textContent = '查询中…';
+
+  fetch('/api/low-score?max_score=' + score)
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      hint.textContent = '';
+      lowEntries = j.entries || [];
+
+      var box = document.getElementById('low-list');
+
+      if (!lowEntries.length) {
+        box.innerHTML = '<div class="modal-empty">没有 ≤ ' + score + ' 分的条目</div>';
+        document.getElementById('low-del').disabled = true;
+        return;
+      }
+
+      document.getElementById('low-del').disabled = false;
+
+      var html = '<div class="modal-list-h">找到 ' + j.count + ' 条'
+               + (j.count > lowEntries.length ? '（显示前 ' + lowEntries.length + '）' : '')
+               + '</div>';
+
+      // 分布直方图：70 分档里混着"厂牌未收录的真番号"，
+      // 只看条数容易一刀切，先看分布再定阈值
+      var dist = j.distribution || {};
+      var keys = Object.keys(dist).sort(function (a, b) { return b - a; });
+      if (keys.length > 1) {
+        var maxN = Math.max.apply(null, keys.map(function (k) { return dist[k]; }));
+        html += '<div class="dist">';
+        keys.forEach(function (k) {
+          var w = Math.max(4, Math.round(dist[k] / maxN * 100));
+          html += '<div class="dist-row">'
+                + '<span class="dist-k mono">' + k + ' 分</span>'
+                + '<span class="dist-bar"><i style="width:' + w + '%"></i></span>'
+                + '<span class="dist-n mono">' + dist[k] + '</span>'
+                + '</div>';
+        });
+        html += '</div>';
+      }
+
+      lowEntries.forEach(function (e) {
+        html += '<div class="modal-row">'
+              + '<span class="tag">' + esc(e.number || '—')
+              + '<i>' + e.confidence + '</i></span>'
+              + '<span class="fntxt">' + esc(e.filename || e.filepath) + '</span>'
+              + '</div>';
+      });
+
+      box.innerHTML = html;
+    })
+    .catch(function (e) { hint.textContent = '查询失败：' + e; });
+}
+
+function removeLowScore() {
+  if (!lowEntries.length) return;
+
+  if (!confirm('从库中摘除这 ' + lowEntries.length + ' 条记录？\n\n'
+             + '磁盘上的文件不会被删除，只是不再出现在媒体库里。')) return;
+
+  var hint = document.getElementById('low-hint');
+  hint.textContent = '处理中…';
+
+  post('/api/low-score/remove', {
+    filepaths: lowEntries.map(function (e) { return e.filepath; })
+  }).then(function (res) {
+    hint.textContent = res.j.message || res.j.error || '完成';
+    if (res.j.ok) {
+      document.getElementById('low-del').disabled = true;
+      lowEntries = [];
+      setTimeout(function () { location.reload(); }, 1200);
+    }
+  });
+}
+
+// ── 手动加入文件 ──────────────────────────────────────────
+
+function openImport() {
+  document.getElementById('modal-import').style.display = 'flex';
+  document.getElementById('import-hint').textContent = '';
+  document.getElementById('import-list').innerHTML = '';
+}
+
+function doImport() {
+  var path = document.getElementById('import-path').value.trim();
+  var hint = document.getElementById('import-hint');
+
+  if (!path) { hint.textContent = '先选文件夹'; return; }
+
+  hint.textContent = '处理中…';
+
+  post('/api/scan/import', { path: path }).then(function (res) {
+    var j = res.j;
+
+    if (!j.ok) { hint.textContent = j.error || '失败'; return; }
+
+    hint.textContent = j.message || '完成';
+
+    var html = '';
+
+    if (j.added && j.added.length) {
+      html += '<div class="modal-list-h">已加入 ' + j.added.length + ' 条</div>';
+      j.added.forEach(function (a) {
+        html += '<div class="modal-row">'
+              + '<span class="tag">' + esc(a.number) + '<i>' + a.confidence + '</i></span>'
+              + '<span class="fntxt">' + esc(a.file) + '</span></div>';
+      });
+    }
+
+    if (j.skipped && j.skipped.length) {
+      html += '<div class="modal-list-h skip">门槛挡下 ' + j.skipped.length + ' 条</div>';
+      j.skipped.forEach(function (a) {
+        html += '<div class="modal-row">'
+              + '<span class="tag miss">' + esc(a.number) + '<i>' + a.confidence + '</i></span>'
+              + '<span class="fntxt">' + esc(a.file) + '</span></div>';
+      });
+    }
+
+    if (!html) {
+      html = '<div class="modal-empty">这个文件夹里没有识别出番号</div>';
+    }
+
+    document.getElementById('import-list').innerHTML = html;
+  });
+}
+
+// ── 文件夹选择框（所有路径输入都走它，不手打路径）─────────
+
+function pickFolder(targetId, hintId) {
+  if (pickLock) return;
+  pickLock = true;
+
+  var hint = hintId ? document.getElementById(hintId) : null;
+  if (hint) { hint.textContent = '等待选择…'; }
+
+  post('/api/pick-folder', {}).then(function (res) {
+    pickLock = false;
+
+    if (!res.j.ok) {
+      if (hint) { hint.textContent = res.j.error || '打开选择框失败'; }
+      return;
+    }
+
+    var p = res.j.path || '';
+    if (!p) {                       // 用户取消
+      if (hint) { hint.textContent = ''; }
+      return;
+    }
+
+    document.getElementById(targetId).value = p;
+    if (hint) { hint.textContent = ''; }
+
+    // 选完即自动执行该输入框对应的动作
+    if (targetId === 'import-path') { doImport(); }
+  });
+}
+
+// ── 导出 / 导入媒体库 ─────────────────────────────────────
+
+// ═══════════════════════ 日志与空目录（本页新增）
+
+function loadFilterLog() {
+  var hint = document.getElementById('log-hint');
+  hint.textContent = '读取中…';
+
+  fetch('/api/filter-log?limit=200')
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      hint.textContent = '';
+
+      var sum = document.getElementById('log-summary');
+      var box = document.getElementById('log-list');
+
+      var items = j.entries || [];
+      var summary = j.summary || [];
+
+      if (summary.length) {
+        var s = '<div class="log-summary-h">按原因汇总（共 ' + (j.total || 0) + ' 条）</div>';
+        summary.forEach(function (x) {
+          s += '<div class="log-sum-row">'
+             + '<span class="tag">' + esc(x.reason || '—') + '<i>' + x.count + '</i></span>'
+             + '<span class="fntxt">' + esc(x.hint || '') + '</span>'
+             + '</div>';
+        });
+        sum.innerHTML = s;
+      } else {
+        sum.innerHTML = '';
+      }
+
+      if (!items.length) {
+        box.innerHTML = '<div class="modal-empty">没有记录</div>';
+        return;
+      }
+
+      var html = '<div class="modal-list-h">最近 ' + items.length + ' 条</div>';
+      items.forEach(function (e) {
+        html += '<div class="modal-row">'
+              + '<span class="tag">' + esc(e.reason || '—') + '</span>'
+              + '<span class="fntxt">' + esc(e.filename || e.filepath || '') + '</span>'
+              + '</div>';
+      });
+      box.innerHTML = html;
+    })
+    .catch(function (e) { hint.textContent = '读取失败：' + e; });
+}
+
+var emptyDirList = [];
+
+// 自选扫描目录（支持多个，用 | 分隔）——
+// ⚠️ 这一步不能省：不传 roots 接口会直接 400（它有意不默认用 scan_paths，
+//    因为那些通常是整个盘符，遍历代价极大、还可能碰坏道）。
+function pickEmptyRoots() {
+  var hint = document.getElementById('ed-hint');
+  hint.textContent = '等待选择…';
+
+  post('/api/pick-folder', {}).then(function (res) {
+    if (!res.j.ok) { hint.textContent = res.j.error || '打开选择框失败'; return; }
+
+    var path = res.j.path || '';
+    if (!path) { hint.textContent = ''; return; }
+
+    var box = document.getElementById('ed-roots');
+    var cur = box.value.trim();
+
+    if (!cur) {
+      box.value = path;
+    } else if (cur.split('|').indexOf(path) === -1) {
+      box.value = cur + '|' + path;      // 重复的不加
+    }
+
+    hint.textContent = '';
+  });
+}
+
+function loadEmptyDirs() {
+  var hint = document.getElementById('ed-hint');
+  var roots = document.getElementById('ed-roots').value.trim();
+
+  if (!roots) {
+    hint.textContent = '先选要扫描的目录';
+    return;
+  }
+
+  hint.textContent = '扫描中…（目录树大时较慢）';
+
+  fetch('/api/empty-dirs?roots=' + encodeURIComponent(roots))
+    .then(function (r) { return r.json().then(function (j) {
+      return { s: r.status, j: j };
+    }); })
+    .then(function (res) {
+      var j = res.j;
+      hint.textContent = '';
+
+      if (!j.ok) {
+        hint.textContent = j.error || '扫描失败';
+        return;
+      }
+
+      emptyDirList = j.dirs || [];
+
+      var box = document.getElementById('ed-list');
+
+      if (!emptyDirList.length) {
+        box.innerHTML = '<div class="modal-empty">没有空目录</div>';
+        return;
+      }
+
+      var html = '<div class="modal-list-h">找到 ' + j.count + ' 个空目录'
+               + (j.count > emptyDirList.length
+                  ? '（只显示前 ' + emptyDirList.length + ' 个）' : '')
+               + '</div>';
+
+      emptyDirList.forEach(function (d) {
+        html += '<div class="modal-row">'
+              + '<span class="fntxt">' + esc(d) + '</span>'
+              + '</div>';
+      });
+
+      html += '<div class="tool-row" style="margin-top:1rem">'
+            + '<button class="ghost danger" onclick="deleteEmptyDirs()">'
+            + '全部送回收站</button>'
+            + '<span class="hint" id="ed-del-hint"></span></div>';
+
+      box.innerHTML = html;
+    })
+    .catch(function (e) { hint.textContent = '扫描失败：' + e; });
+}
+
+function deleteEmptyDirs() {
+  if (!emptyDirList.length) { return; }
+
+  if (!confirm('把这 ' + emptyDirList.length + ' 个空目录送进回收站？\n\n'
+      + '· 只删「整棵子树一个文件都没有」的目录\n'
+      + '· 走回收站，随时可恢复\n'
+      + '· 卡片不受影响')) {
+    return;
+  }
+
+  var hint = document.getElementById('ed-del-hint');
+  if (hint) { hint.textContent = '处理中…'; }
+
+  // 注意字段名：接口返回的是 deleted / failed（不是 removed）
+  post('/api/empty-dirs/delete', { dirs: emptyDirList }).then(function (res) {
+    var j = res.j || {};
+    var failed = (j.failed && j.failed.length) || 0;
+
+    if (hint) {
+      hint.textContent = '已送回收站 ' + (j.deleted || 0) + ' 个'
+        + (failed ? '，失败 ' + failed : '');
+    }
+
+    loadEmptyDirs();
+  });
+}
+
+</script>
+
+</body>
+</html>

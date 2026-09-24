@@ -64,6 +64,49 @@ video_extensions: []
 #    但加引号更不容易让人误读。
 fallback: "off"
 
+# 数据源后端（2026-09-24）
+#
+# 两个数据源都可以「自己实现」或「借外部程序」：
+#
+#   javdb_backend:
+#     cli    -> 调 `javdb` 二进制（17.8MB Go 程序，需另装）
+#     native -> 直连 JavDB App API（本仓自带，零外部程序）
+#
+#   javbus_backend:
+#     service -> 调自托管 `javbus-api`（Node 服务，需另装）
+#     native  -> 直接抓 JavBus 网页（本仓自带，零外部服务）
+#
+# ## 为什么默认仍是外部程序
+#
+# 两个 native 后端**都已实测对拍一致**（javdb 11 个番号 40/40~41/41 字段，
+# javbus 6 个番号 11/11 字段 + 磁力 hash 集合全同），但**默认还没切**：
+# native 路径需要自己管代理，而现有部署里这个坑是靠外部程序的配置兜住的。
+# 确认代理配好、且跑过一轮真实批量抓取之后，再切默认。
+#
+# 环境变量 `LMM_JAVDB_BACKEND` / `LMM_JAVBUS_BACKEND` 优先于这里
+# （便于临时试验，不必改文件）。
+javdb_backend: "cli"
+javbus_backend: "service"
+
+# native 后端抓 JavBus 用的代理。
+#
+# ⚠️ JavBus 在国内**直连超时**（实测），必须走代理。而环境里默认**没有**
+#    proxy 变量，所以这里要显式给（或自己设 HTTPS_PROXY 环境变量）。
+#    留空 = 用系统环境变量里的代理设置（requests 的 trust_env 行为）。
+#
+# 写法与后端无关，两种都行：
+#   http://127.0.0.1:7890      普通 HTTP 代理（Clash mixed 端口就是它）
+#   socks5h://127.0.0.1:7890   SOCKS5（需另装 PySocks）
+#
+# 端口按自己机器上的代理客户端改。7890 是 Clash 的 mixed 端口。
+javbus_proxy: ""
+
+# native 后端抓 JavDB 用的代理。
+#
+# JavDB 的 App API **直连可用**（实测，境外镜像域名），一般留空即可；
+# 本地网络环境特殊时再填。
+javdb_proxy: ""
+
 # 批量抓取的并发度。
 #
 # 实测（2026-09-24，隔离登录态）：

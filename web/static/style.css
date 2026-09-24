@@ -1974,3 +1974,207 @@ a.card:focus-visible {
   margin-top: 0.2rem;
   padding-right: 0.35rem;   /* 给滚动条留位，别压住数字列 */
 }
+
+/* ── 设置页（/settings）───────────────────────────────────
+   表单块的容器与字段排版。配色沿用既有变量，不引入新颜色。 */
+.panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 1.5rem 1.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.field {
+  display: block;
+  margin-bottom: 1.5rem;
+}
+
+.field:last-child {
+  margin-bottom: 0;
+}
+
+.field-label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 0.5rem;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.65rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--fg);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  transition: border-color 0.2s var(--ease);
+}
+
+.field input:focus,
+.field select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.field select {
+  font-family: var(--font);
+  cursor: pointer;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--fg-faint);
+}
+
+.field-hint code {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  padding: 0.1rem 0.35rem;
+  background: var(--card-hi);
+  border-radius: 0.3rem;
+}
+
+/* 设置页里没有 --ok 变量，用强调色表示成功 */
+.note[style*="var(--ok)"] {
+  color: var(--accent) !important;
+}
+
+/* ── 维护页（/maintenance）─────────────────────────────────
+   折叠块、工具行、日志汇总。配色沿用既有变量。 */
+
+.fold {
+  border-top: 1px solid var(--line);
+  padding-top: 1.1rem;
+  margin-top: 1.1rem;
+}
+
+.fold:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.fold > summary {
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--fg);
+  list-style: none;
+  padding: 0.35rem 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+}
+
+.fold > summary::-webkit-details-marker { display: none; }
+
+.fold > summary::before {
+  content: "▸";
+  color: var(--accent);
+  font-size: 0.85rem;
+  transition: transform 0.2s var(--ease);
+  display: inline-block;
+}
+
+.fold[open] > summary::before { transform: rotate(90deg); }
+
+.fold-note {
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--fg-faint);
+}
+
+.tool-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0.4rem 0;
+}
+
+.tool-row .hint {
+  font-size: 0.82rem;
+  color: var(--fg-faint);
+}
+
+/* 工具行里的链接按钮要跟 <button> 长得一样 */
+a.ghost {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.log-summary {
+  margin: 0.9rem 0;
+}
+
+.log-summary-h {
+  font-size: 0.82rem;
+  color: var(--fg-faint);
+  margin-bottom: 0.5rem;
+}
+
+.log-sum-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.log-sum-row:last-child { border-bottom: none; }
+
+.log-sum-row .fntxt {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  color: var(--fg-dim);
+}
+
+/* ── 几百张卡片的渲染优化（主人 09-24 报「切标签特别卡」）─────────
+   实测：296 张卡片在 CPU 4x 降速下，纯布局要 1310ms，整个导航到 load
+   要 2680ms。先怀疑过若干 CSS（aspect-ratio / transform / box-shadow /
+   transition / backdrop-filter），逐个关掉测下来**都没用**（全关也只
+   省 8%）—— 那就是浏览器给几百个元素做布局的固有成本。
+
+   content-visibility: auto 是正解：不在视口内的卡片，浏览器**跳过其
+   子树的布局与绘制**。实测布局 1310ms -> 591ms（-55%），导航到 load
+   2680ms -> 1308ms。
+
+   contain-intrinsic-size 必须给，且要**接近真实高度** ——
+   否则滚动条会因为「先按占位算、滚到了再变高」而跳动。
+   卡片的真实高度实测约 551px（1440 视口，5 列），这里取 556px。
+   ⚠️ 改卡片尺寸（封面比例、meta 内边距、列宽）后要同步这个值。 */
+.shell {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 556px;
+}
+
+
+/* ── 无限滚动的加载提示与结束条 ─────────────────────────── */
+.load-hint,
+.load-end {
+  text-align: center;
+  padding: 1.6rem 0 2.4rem;
+  font-size: 0.85rem;
+  color: var(--fg-faint);
+}
+
+.load-end {
+  border-top: 1px solid var(--line);
+  margin-top: 1.5rem;
+}
+
+.load-end span {
+  font-family: var(--mono);
+  color: var(--fg-dim);
+}

@@ -33,6 +33,26 @@ import os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _add_args(args, bound):
+    """把参数名加入白名单。
+
+    ⚠️ 必须连 `*args` / `**kwargs` 一起收 —— 漏了它们会**误报**：
+    `def f(self, *args, **kwargs): super().m(*args, **kwargs)` 里的
+    `kwargs` 其实是绑定，但只看 args/kwonlyargs/posonlyargs 就查不到。
+    这个检查的价值全在「零误报」（见模块文档），一旦误报就会被人加例外，
+    真问题也一起放过去了。
+    """
+
+    for arg in (args.args + args.kwonlyargs + args.posonlyargs):
+        bound.add(arg.arg)
+
+    if args.vararg:
+        bound.add(args.vararg.arg)
+
+    if args.kwarg:
+        bound.add(args.kwarg.arg)
+
+
 def _missing_names(path):
     tree = ast.parse(io.open(path, encoding="utf-8").read())
 
@@ -59,18 +79,14 @@ def _missing_names(path):
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             bound.add(node.name)
 
-            for arg in (node.args.args + node.args.kwonlyargs
-                        + node.args.posonlyargs):
-                bound.add(arg.arg)
+            _add_args(node.args, bound)
 
         elif isinstance(node, ast.ClassDef):
             bound.add(node.name)
 
         elif isinstance(node, ast.Lambda):
             # `lambda x: ...` 的 x 也是绑定（漏了它会误报）
-            for arg in (node.args.args + node.args.kwonlyargs
-                        + node.args.posonlyargs):
-                bound.add(arg.arg)
+            _add_args(node.args, bound)
 
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             for a in node.names:

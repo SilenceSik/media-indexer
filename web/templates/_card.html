@@ -1,0 +1,113 @@
+    <div class="shell">
+      <div class="card">
+        <a class="cover-link" href="/detail/{{ v.number }}">
+          <div class="cover-box">
+            {% if v.cover_file %}
+            <img class="cover" src="/images/covers/{{ v.cover_file }}" alt="{{ v.number }}" loading="lazy">
+            {% else %}
+            <div class="cover-empty">NO COVER</div>
+            {% endif %}
+          </div>
+        </a>
+        <div class="meta">
+          <div class="numrow">
+            <a class="num" href="/detail/{{ v.number }}">{{ v.number }}</a>
+            <button class="fav{% if v.favorite %} on{% endif %}"
+                    data-num="{{ v.number }}"
+                    title="{% if v.favorite %}取消收藏{% else %}收藏（只做标记，不影响档位与删除门控）{% endif %}"
+                    onclick="toggleFav(this)">{% if v.favorite %}❤️{% else %}🤍{% endif %}</button>
+          </div>
+
+          {# ── 证据条：档位 / 置信分 / 磁力 / 评论 ──
+             置信分取代旧的「强证据」二值位 —— 后者只数服务器侧磁力条数
+             （>=10 即亮），不看本地文件。FH-27 靠 15 条磁力拿过「强证据」，
+             本地文件却全是 9~28 分钟的短片。 #}
+          {% if v.tier %}
+          <div class="evidence">
+            <span class="tier t-{{ {'极低':'vl','低':'lo','高':'hi','极高':'vh'}.get(v.tier,'x') }}">
+              {{ v.tier }}
+            </span>
+
+            <span class="conf c-{{ 'ok' if v.confidence >= 70 else ('mid' if v.confidence >= 40 else 'bad') }}"
+                  title="置信分 {{ v.confidence }}/100
+服务器侧证据 {{ v.confidence_base }}（磁力/核对/来源/评论）
+× 时长一致性 {{ '%.0f'|format(v.confidence_duration * 100) }}%{% if not v.duration_known %}（未跑时长核对，本项按不扣分计）{% endif %}
+
+只用于展示与排序，不参与删除门控。">
+              {{ v.confidence }}
+            </span>
+
+            <span class="ev" title="判定为属于该番号的磁力条数（按 hash 去重）">
+              磁力 {{ v.correct_magnets if v.correct_magnets is not none else '—' }}
+            </span>
+
+            {% if v.duration_mismatch %}
+            <span class="ev bad"
+                  title="本地文件的时长与元数据差得太远（{{ v.duration_note }}），
+这批文件根本不是这部片 —— 置信分已归零。
+抓元数据时会自动从媒体库剔除；磁盘文件不动。">
+              时长不符
+            </span>
+            {% elif v.duration_known and v.confidence_duration < 0.5 %}
+            <span class="ev warn"
+                  title="本地文件时长与元数据差得远，可能不是这部片（或只是片段）。
+这不代表可删 —— 仍按档位与核对门控。">
+              时长存疑
+            </span>
+            {% endif %}
+
+            <span class="ev" title="javdb 评论数（定「极高」档用）">
+              评论 {{ v.comments_count if v.comments_count is not none else '—' }}
+            </span>
+
+            {% if v.number_matches is not none and not v.number_matches %}
+            <span class="ev warn" title="javdb 返回的番号与识别出的不一致，不可批量删">
+              核对不过
+            </span>
+            {% endif %}
+          </div>
+          {% else %}
+          <div class="evidence">
+            <span class="tier t-none" title="还没跑过抓取，没有档位与磁力证据">
+              未判定
+            </span>
+            <span class="conf c-bad" title="还没跑过抓取，置信分无从算起">—</span>
+          </div>
+          {% endif %}
+
+          {% if v.title %}<span class="ttl">{{ v.title }}</span>{% endif %}
+
+          {# ── 本地文件状态 ──
+             卡是这部片的档案，删源文件只是磁盘管理 —— 所以全删了卡也要在，
+             只是标出来「本地已删」，并保留磁力/种子/元数据供以后重下。 #}
+          {% if v.local_deleted_all %}
+          <span class="fn gone">本地文件已删（{{ v.local_deleted_count }} 个已送回收站）</span>
+          {% elif v.filename %}
+          <span class="fn">{{ v.filename }}{% if v.local_files > 1 %} 等 {{ v.local_files }} 个{% endif %}</span>
+          {% endif %}
+
+          <div class="card-actions">
+            {% if v.local_files %}
+            <button class="mini" title="打开所在文件夹" onclick="act('open','{{ v.number }}',this)">位置</button>
+            {% else %}
+            <button class="mini off" title="本地文件已删，没有位置可开" disabled>位置</button>
+            {% endif %}
+            {% if not v.local_files %}
+            <button class="mini off" title="本地文件已删，无需再删；卡保留" disabled>已删</button>
+            {% elif v.can_batch %}
+            <button class="mini danger" title="可批量删（档位够、番号核对过、识别可信、格式典型）"
+                    onclick="act('delete','{{ v.number }}',this)">删除</button>
+            {% elif v.can_manual %}
+            <button class="mini danger" title="只能手动逐条删：{{ v.blocked_reason }}"
+                    onclick="act('delete','{{ v.number }}',this)">删除</button>
+            {% else %}
+            <button class="mini off"
+                    title="{% if not v.tier %}还没跑抓取，没有档位证据{% else %}按门控规则不可删（{{ v.blocked_reason }}）{% endif %}"
+                    disabled>删除</button>
+            {% endif %}
+            <button class="mini" title="把磁力存到项目目录" onclick="act('torrent','{{ v.number }}',this)">种子</button>
+            <button class="mini" title="抓取元数据/磁力/封面截图" onclick="act('enrich','{{ v.number }}',this)">抓取</button>
+          </div>
+        </div>
+      </div>
+    </div>

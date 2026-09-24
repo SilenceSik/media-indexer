@@ -2,7 +2,3 @@ storage/
 __pycache__/
 *.pyc
 .backup/
-.pytest_cache/
-samples/verify_cache.json
-samples/library.db
-samples/final_list.tsv

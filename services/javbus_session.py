@@ -16,6 +16,7 @@
 """
 
 import os
+import shutil
 import socket
 import subprocess
 import time
@@ -23,9 +24,17 @@ import time
 HOST = "127.0.0.1"
 PORT = 8922
 
-# 本机部署位置（见 skill devops/javbus-api-ops）
-APP_DIR = r"X:\Apps\javbus-api"
-NODE = r"C:\Program Files\nodejs\node.exe"
+# javbus-api 的部署位置。
+#
+# 默认按平台惯例猜一个，但**允许用环境变量覆盖** —— 每个人的安装路径
+# 都不一样，写死等于只有原作者能跑。
+APP_DIR = os.environ.get("LMM_JAVBUS_API_DIR") or os.path.join(
+    os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+    "javbus-api",
+)
+
+# node 可执行文件：先看 PATH，再退回常见安装位置
+NODE = os.environ.get("LMM_NODE") or shutil.which("node") or "node"
 
 
 def port_open(host=HOST, port=PORT, timeout=0.4):
@@ -120,10 +129,27 @@ class JavBusSession:
 
         try:
 
+            # 把我们的代理设置传进去。
+            #
+            # ⚠️ 服务自己是靠 `.env` 里的 HTTP_PROXY 走代理的，而
+            # **端口不该由软件预设** —— 使用者在设置页填的地址要能生效。
+            # `dotenv` 默认**不覆盖**已存在的环境变量，所以我们传进去的
+            # 会盖过它 `.env` 里的值；没填时就不传，让它按自己的配置走。
+            env = dict(os.environ)
+
+            from adapters.javbus_adapter import resolve_proxy
+
+            proxy = resolve_proxy()
+
+            if proxy:
+                env["HTTP_PROXY"] = proxy
+                env["HTTPS_PROXY"] = proxy
+
             # 隐藏窗口后台起，与 vbs 启动器等效
             subprocess.Popen(
                 [NODE, "-r", "dotenv/config", "dist/server.js"],
                 cwd=self.app_dir,
+                env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -177,6 +203,21 @@ class JavBusSession:
         if not self.enabled:
             self.note = "兜底未启用"
             return self
+
+        # native 后端**直接抓网页，不需要这个 Node 服务** ——
+        # 起了也只是白占 90MB，还可能与使用者的其它实例抢端口。
+        try:
+
+            from adapters.javbus_adapter import resolve_backend
+
+            if resolve_backend() == "native":
+                self.ready = True
+                self.started_by_us = False
+                self.note = "后端为 native，跳过 javbus-api 服务"
+                return self
+
+        except Exception:                                      # noqa: BLE001
+            pass
 
         if port_open():
             # 已经有人在跑（也许是开机自启）—— 不是我们起的，就别杀

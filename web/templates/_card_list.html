@@ -1,0 +1,6 @@
+{# 卡片列表片段 —— 供 /api/cards 渲染「下一批」用。
+   与首页共用 _card.html，所以样式与条件分支天然一致，
+   不会出现「首屏和后续批次长得不一样」。 #}
+{% for v in videos %}
+  {% include "_card.html" %}
+{% endfor %}

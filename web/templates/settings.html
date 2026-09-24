@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设置</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="aurora"></div>
+<div class="grain"></div>
+
+<div class="wrap">
+
+  <nav class="nav">
+    <span class="brand"><span class="dot"></span>媒体库</span>
+    <div class="nav-links">
+      <a href="/">全部</a>
+      <a href="/?favorite=1">收藏</a>
+      <a href="/?has_magnet=1">有磁力</a>
+      <a href="/?missing_meta=1">缺元数据</a>
+      <a href="/scan">扫描</a>
+      <a href="/maintenance">维护</a>
+      <a href="/settings" class="on">设置</a>
+    </div>
+    <form class="search" action="/search" method="get">
+      <input name="q" placeholder="搜索番号" autocomplete="off">
+      <button type="submit">搜索</button>
+    </form>
+  </nav>
+
+  <header class="hero" style="grid-template-columns:1fr; margin-bottom:2.5rem">
+    <div>
+      <h1>设置</h1>
+      <p>
+        数据源后端与代理。**代理端口由你自己填** —— 软件不预设任何端口，
+        因为每个人机器上的代理客户端端口都不一样。
+      </p>
+    </div>
+  </header>
+
+  {% if saved %}
+  <p class="note" style="color:var(--ok)">已保存 ✓{{ saved_note }}</p>
+  {% endif %}
+
+  {% if error %}
+  <p class="note" style="color:var(--danger)">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="/settings">
+
+    {# ── JavDB ── #}
+    <p class="section-h">JavDB（主源）</p>
+
+    <div class="panel">
+      <label class="field">
+        <span class="field-label">后端</span>
+        <select name="javdb_backend">
+          <option value="cli" {% if cur.javdb_backend.value == 'cli' %}selected{% endif %}>
+            cli —— 调 javdb 命令（需另装那个程序）
+          </option>
+          <option value="native" {% if cur.javdb_backend.value == 'native' %}selected{% endif %}>
+            native —— 本仓自带，零外部程序
+          </option>
+        </select>
+        <span class="field-hint">当前来源：{{ cur.javdb_backend.source }}</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">代理</span>
+        <input name="javdb_proxy" value="{{ cur.javdb_proxy.value }}"
+               placeholder="留空 = 直连 / 用系统环境变量">
+        <span class="field-hint">
+          格式 <code>http://主机:端口</code> 或 <code>socks5h://主机:端口</code>。
+          当前来源：{{ cur.javdb_proxy.source }}。JavDB 一般直连可用，留空即可。
+        </span>
+      </label>
+    </div>
+
+    {# ── JavBus ── #}
+    <p class="section-h">JavBus（兜底）</p>
+
+    <div class="panel">
+      <label class="field">
+        <span class="field-label">后端</span>
+        <select name="javbus_backend">
+          <option value="service" {% if cur.javbus_backend.value == 'service' %}selected{% endif %}>
+            service —— 调本机 javbus-api 服务（需另装那个服务）
+          </option>
+          <option value="native" {% if cur.javbus_backend.value == 'native' %}selected{% endif %}>
+            native —— 本仓自带，直接抓网页
+          </option>
+        </select>
+        <span class="field-hint">当前来源：{{ cur.javbus_backend.source }}</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">代理</span>
+        <input name="javbus_proxy" value="{{ cur.javbus_proxy.value }}"
+               placeholder="例如 http://127.0.0.1:7890（端口按你自己的代理填）">
+        <span class="field-hint">
+          ⚠️ JavBus 在国内**直连超时**，必须走代理。<strong>端口没有默认值</strong>
+          —— 按你自己代理客户端的监听端口填。格式与上一项相同。
+          当前来源：{{ cur.javbus_proxy.source }}。
+        </span>
+      </label>
+    </div>
+
+    <p class="section-h" style="margin-top:2rem">
+      <button type="submit">保存</button>
+      <button type="button" class="ghost" onclick="testConn()">测试连通性</button>
+      <span id="test-result" class="note" style="margin-left:1rem"></span>
+    </p>
+
+    <p class="field-hint" style="display:block; margin-top:1rem">
+      保存写到 <code>storage/settings.json</code>（UI 可改的那几个键）。
+      部署级的其它设置仍在 <code>config.yaml</code> 里手改 ——
+      那份文件带完整注释，UI 不碰它。
+      <br>
+      生效优先级：环境变量 &gt; 这里保存的值 &gt; <code>config.yaml</code> &gt; 内置默认。
+    </p>
+
+  </form>
+
+</div>
+
+<script>
+async function testConn() {
+  const out = document.getElementById('test-result');
+  out.textContent = '测试中…';
+  out.style.color = 'var(--muted-foreground)';
+  try {
+    const r = await fetch('/api/settings/test', {method: 'POST'});
+    const j = await r.json();
+    const lines = (j.results || []).map(x =>
+      (x.ok ? '✓ ' : '✗ ') + x.name + '：' + x.detail
+    );
+    out.innerHTML = lines.join('<br>');
+    out.style.color = (j.results || []).every(x => x.ok)
+      ? 'var(--ok)' : 'var(--danger)';
+  } catch (e) {
+    out.textContent = '测试失败：' + e;
+    out.style.color = 'var(--danger)';
+  }
+}
+</script>
+
+</body>
+</html>

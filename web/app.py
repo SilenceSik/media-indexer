@@ -97,10 +97,52 @@ templates = Jinja2Templates(
 
 
 # 静态资源。模板引的是 /static/style.css —— 缺这个挂载会 404 并导致页面裸奔。
+#
+# ⚠️ 必须带 Cache-Control，否则**每次切页都要回问服务器一遍**。
+# 实测：默认只有 ETag，浏览器对首页 296 张卡片全部发条件请求
+# -> 切标签明显卡顿。图片是内容寻址（文件名是内容哈希），内容不会变，
+# 所以可以放心给长缓存。
+class CachedStaticFiles(StaticFiles):
+    """给静态资源加上 Cache-Control。
+
+    为什么必须加：Starlette 的 StaticFiles 默认**不发 Cache-Control**，
+    浏览器于是每次都要拿 ETag 回问一遍。首页有近 300 张卡片缩略图，
+    切页时就是近 300 个条件请求 —— 表现就是「切标签特别卡」。
+
+    图片文件名是内容哈希（如 `1921b0c12819bee6efe1f6213762f4b8.jpg`），
+    内容变了文件名就变，所以长缓存是安全的。
+    """
+
+    def __init__(self, *args, max_age=604800, **kwargs):
+        self.max_age = max_age
+        super().__init__(*args, **kwargs)
+
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+
+        if self.max_age > 0:
+            resp.headers["Cache-Control"] = "public, max-age={}".format(
+                self.max_age)
+        else:
+            # 允许存，但每次必须回源校验（配 ETag -> 没变就 304）
+            resp.headers["Cache-Control"] = "no-cache"
+
+        return resp
+
+
 app.mount(
     "/static",
-    StaticFiles(
-        directory=os.path.join(BASE_DIR, "web/static")
+    # ⚠️ 这里**不能**用长缓存。
+    #
+    # 图片的文件名是内容哈希（内容变则文件名变），长缓存安全；
+    # 但 style.css / common.js 的文件名是**固定的** —— 长缓存会让
+    # 部署新样式后用户 7 天看不到变化（我自己先踩了这一步）。
+    #
+    # 用 no-cache 的语义是「可以存，但每次要先问一下」：仍然带 ETag，
+    # 没变就回 304（无响应体），只多一个极轻的往返，换来「改完立刻生效」。
+    CachedStaticFiles(
+        directory=os.path.join(BASE_DIR, "web/static"),
+        max_age=0,
     ),
     name="static"
 )
@@ -127,7 +169,7 @@ os.makedirs(
 
 app.mount(
     "/images",
-    StaticFiles(
+    CachedStaticFiles(
         directory=IMAGE_ROOT
     ),
     name="images"
@@ -176,7 +218,7 @@ if os.path.normcase(os.path.abspath(SCREENSHOTS_DIR)) != \
 
     app.mount(
         "/shots",
-        StaticFiles(
+        CachedStaticFiles(
             directory=SCREENSHOTS_DIR
         ),
         name="shots"
@@ -202,8 +244,12 @@ os.makedirs(
 
 app.mount(
     "/previews",
-    StaticFiles(
-        directory=PREVIEWS_DIR
+    # 宣传视频**是可重新录制的**（重录后同名文件内容会变），
+    # 所以给短缓存（5 分钟）而不是图片那种长缓存 —— 否则重录完
+    # 用户会看到旧视频，还以为没录成功。
+    CachedStaticFiles(
+        directory=PREVIEWS_DIR,
+        max_age=300,
     ),
     name="previews"
 )
@@ -587,7 +633,7 @@ def score_breakdown(correct, comments, matches, source, ratios,
 
         if floored != cons:
 
-            note += "；已按兜底抬到 {:.0f}%（防 ffprobe 偶发误读清零）".format(
+            note += "；已按兜底抬到 {:.0f}%（防探测偶发误读清零）".format(
                 C.CONSISTENCY_FLOOR * 100)
 
         duration = {"known": True, "value": floored, "note": note}
@@ -1325,6 +1371,160 @@ def library_stats():
     }
 
 
+# ═══════════════════════ 卡片查询（首页与分页接口共用）
+
+# 首屏一次渲染多少张卡片。
+#
+# 为什么要有这个数：主人 09-24 报「切标签特别卡」，查出来是**一次性渲染
+# 几百张卡片**的固有成本（296 张纯布局 1.3s，CPU 4x 降速下）。
+# content-visibility 只省了屏幕外元素的布局，HTML 与 DOM 仍是全量 ——
+# 库里几千部时会彻底扛不住。所以改成按需追加。
+#
+# 24 张 = 桌面约 5 列 x 5 行，首屏铺满且略有富余。
+CARDS_PAGE_SIZE = 24
+
+
+def _cards_where(has_magnet=0, missing_meta=0, favorite=0, q=""):
+    """拼筛选条件。**首页与分页接口共用** —— 口径必须一致，不能各写一套。"""
+
+    if favorite:
+        # 只看收藏。纯人工标记，与档位/磁力无关。
+        return " WHERE titles.favorite = 1 ", ()
+
+    if has_magnet:
+        # 只显示有「已验证磁力」的番号（= 可删候选）
+        return (
+            " WHERE titles.id IN ("
+            "   SELECT title_id FROM magnets WHERE verified = 1"
+            " ) ", ())
+
+    if missing_meta:
+        return (
+            " WHERE titles.id NOT IN ("
+            "   SELECT title_id FROM metadata"
+            "   WHERE title IS NOT NULL OR cover_local IS NOT NULL"
+            " ) ", ())
+
+    if q:
+        return " WHERE titles.number LIKE ? ", ("%{}%".format(q),)
+
+    return "", ()
+
+
+def count_cards(has_magnet=0, missing_meta=0, favorite=0, q=""):
+    """符合条件的**总数**（分页要知道还有多少）。"""
+
+    where, args = _cards_where(has_magnet, missing_meta, favorite, q)
+
+    row = query("SELECT COUNT(*) AS n FROM titles" + where, args)
+
+    return int(row[0]["n"]) if row else 0
+
+
+def fetch_cards(offset=0, limit=None, has_magnet=0, missing_meta=0,
+                favorite=0, q="", weights=None):
+    """取一页卡片（已转成模板要的形状）。
+
+    ## ⚠️ 分页必须按**番号**，不能按文件行
+
+    `LIST_SQL` 是 `titles LEFT JOIN media_files`，一个番号多文件时会有
+    多行；而 `rows_to_videos()` 按番号聚合成**一张卡**（主人定的口径：
+    一个番号一张卡）。所以若直接对 rows 做 LIMIT/OFFSET：
+
+      * 每页实际出的卡片数少于 limit（被聚合掉的）
+      * 页码漂移 —— 第 2 页从 offset=24 开始，但前 24 行只出了 23 张卡，
+        于是**重复**一个番号，后面还会连环错位
+
+    实测本库有 18 个番号是多文件的（326 行 / 296 番号），一定会踩到。
+
+    所以走两步：先对 `titles` 分页取出本页的**番号**，再取这些番号的
+    完整行交给 `rows_to_videos()`。
+    """
+
+    limit = int(limit if limit is not None else CARDS_PAGE_SIZE)
+
+    where, args = _cards_where(has_magnet, missing_meta, favorite, q)
+
+    # 第一步：本页的番号（按 titles 分页，与 count_cards 同一套条件）
+    page = query(
+        "SELECT titles.id AS tid, titles.number AS number FROM titles"
+        + where
+        + """
+        ORDER BY COALESCE(titles.favorite, 0) DESC, titles.number
+        LIMIT ? OFFSET ?
+        """,
+        tuple(args) + (limit, int(offset))
+    )
+
+    if not page:
+        return []
+
+    tids = [r["tid"] for r in page]
+
+    # 第二步：取这些番号的完整行（用 IN，不用 LIMIT —— 保证不漏文件）
+    placeholders = ",".join("?" for _ in tids)
+
+    rows = query(
+        LIST_SQL
+        + " WHERE titles.id IN ({})".format(placeholders)
+        + """
+        ORDER BY COALESCE(titles.favorite, 0) DESC, titles.number
+        """,
+        tuple(tids)
+    )
+
+    return rows_to_videos(
+        rows, deletable_numbers(), eligibility_index(), duration_index(),
+        weights=weights,
+    )
+
+
+@app.get(
+    "/api/cards",
+    response_class=JSONResponse
+)
+def api_cards(
+    offset: int = 0,
+    limit: int = None,
+    has_magnet: int = 0,
+    missing_meta: int = 0,
+    favorite: int = 0,
+    q: str = "",
+    w_magnets: float = None,
+    w_match: float = None,
+    w_source: float = None,
+    w_comments: float = None
+):
+    """按需取卡片（无限滚动用）。
+
+    服务端渲染好 HTML 片段返回 —— 卡片模板里有大量条件分支
+    （档位 / 置信分 / 时长 / 删除门控……），在 JS 里重写一份必然两边走样。
+    直接用同一份 `_card.html`，口径天然一致。
+    """
+
+    weights = normalize_weights(w_magnets, w_match, w_source, w_comments)
+
+    limit = max(1, min(int(limit or CARDS_PAGE_SIZE), 200))
+
+    videos = fetch_cards(
+        offset=offset, limit=limit,
+        has_magnet=has_magnet, missing_meta=missing_meta,
+        favorite=favorite, q=q, weights=weights,
+    )
+
+    total = count_cards(has_magnet, missing_meta, favorite, q)
+
+    html = templates.get_template("_card_list.html").render(videos=videos)
+
+    return {
+        "html": html,
+        "count": len(videos),
+        "offset": offset,
+        "total": total,
+        "has_more": (int(offset) + len(videos)) < total,
+    }
+
+
 @app.get(
     "/",
     response_class=HTMLResponse
@@ -1340,52 +1540,18 @@ def index(
     w_comments: float = None
 ):
 
-    # ── 置信分配比（主人 09-24 要求「首页支持自己配比置信分」）──
-    #
-    # 四项权重可以按 URL 参数覆盖，**归一化到 1**（不然「总和」不是 100，
-    # 分数会跑出 0-100 之外）。不传就用默认值。
     weights = normalize_weights(w_magnets, w_match, w_source, w_comments)
 
-    where = ""
-    args = ()
-
-    if favorite:
-
-        # 只看收藏。纯人工标记，与档位/磁力无关。
-        where = """
-        WHERE titles.favorite = 1
-        """
-
-    elif has_magnet:
-
-        # 只显示有「已验证磁力」的番号（= 可删候选）
-        where = """
-        WHERE titles.id IN (
-            SELECT title_id FROM magnets WHERE verified = 1
-        )
-        """
-
-    elif missing_meta:
-
-        where = """
-        WHERE titles.id NOT IN (
-            SELECT title_id FROM metadata
-            WHERE title IS NOT NULL OR cover_local IS NOT NULL
-        )
-        """
-
-    rows = query(
-        LIST_SQL
-        + where
-        + """
-        ORDER BY COALESCE(titles.favorite, 0) DESC, titles.number
-        LIMIT 500
-        """,
-        args
+    # 首屏只渲染一页；其余随滚动按需取（见 /api/cards）
+    videos = fetch_cards(
+        offset=0, limit=CARDS_PAGE_SIZE,
+        has_magnet=has_magnet, missing_meta=missing_meta,
+        favorite=favorite, weights=weights,
     )
 
+    total = count_cards(has_magnet, missing_meta, favorite)
+
     # 高置信可批量删的数量 —— 首页「一键送回收站」按钮用它决定显示与否。
-    # 复用同一份 eligibility，不另查一遍（口径必须一致）。
     try:
 
         _elig = eligibility_index()
@@ -1394,25 +1560,29 @@ def index(
 
     except Exception:                                           # noqa: BLE001
 
-        _elig = {}
         batch_count = 0
 
     return templates.TemplateResponse(
         request,
         "index.html",
         {
-            "videos": rows_to_videos(
-                rows, deletable_numbers(), eligibility_index(), duration_index(),
-                weights=weights,
-            ),
+            "videos": videos,
+            "total": total,
+            "page_size": CARDS_PAGE_SIZE,
             "stats": library_stats(),
             "q": "",
             "fav_only": bool(favorite),
-            # 置信分配比（主人 09-24 要求「首页支持自己配比置信分」）
+            "has_magnet": has_magnet,
+            "missing_meta": missing_meta,
+            "favorite": favorite,
             "weights": weights,
             "weights_default": DEFAULT_WEIGHTS,
-            # 高置信可批量删的数量（主人 09-24 要的「一键送回收站」）
             "batch_count": batch_count,
+            # 分页接口要用同样的权重（不然后续批次的分数会跟首屏不一致）
+            "w_magnets": w_magnets if w_magnets is not None else "",
+            "w_match": w_match if w_match is not None else "",
+            "w_source": w_source if w_source is not None else "",
+            "w_comments": w_comments if w_comments is not None else "",
         }
     )
 
@@ -1425,30 +1595,43 @@ def search(
     request: Request,
     q: str = ""
 ):
+    """按番号搜索。
 
-    rows = query(
-        LIST_SQL
-        + """
-        WHERE titles.number LIKE ?
+    ⚠️ 这个路由此前**一直是 500** —— 它调
+    `rows_to_videos(..., weights=weights)` 但 `weights` 从未定义
+    （NameError）。搜一下才发现，属于既存 bug。
 
-        ORDER BY titles.number
-        LIMIT 500
-        """,
-        (
-            f"%{q}%",
-        )
+    顺手改成与其他页面一致：首屏一页 + 滚动按需取。
+    """
+
+    weights = normalize_weights()
+
+    videos = fetch_cards(
+        offset=0, limit=CARDS_PAGE_SIZE, q=q, weights=weights,
     )
+
+    total = count_cards(q=q)
 
     return templates.TemplateResponse(
         request,
         "index.html",
         {
-            "videos": rows_to_videos(
-                rows, deletable_numbers(), eligibility_index(), duration_index(),
-                weights=weights,
-            ),
+            "videos": videos,
+            "total": total,
+            "page_size": CARDS_PAGE_SIZE,
             "stats": library_stats(),
             "q": q,
+            "fav_only": False,
+            "has_magnet": 0,
+            "missing_meta": 0,
+            "favorite": 0,
+            "weights": weights,
+            "weights_default": DEFAULT_WEIGHTS,
+            "batch_count": 0,
+            "w_magnets": "",
+            "w_match": "",
+            "w_source": "",
+            "w_comments": "",
         }
     )
 
@@ -1498,13 +1681,31 @@ def detail(
 
     if not head:
 
+        # ⚠️ index.html 现在还要 total / page_size / weights 等上下文
+        # （加了分页容器与配比面板）。少给一个就是 UndefinedError -> 500，
+        # 于是「番号不存在」看起来像「服务器坏了」。**给齐**。
+        _w = normalize_weights()
+
         return templates.TemplateResponse(
             request,
             "index.html",
             {
                 "videos": [],
+                "total": 0,
+                "page_size": CARDS_PAGE_SIZE,
                 "stats": library_stats(),
                 "q": number,
+                "fav_only": False,
+                "has_magnet": 0,
+                "missing_meta": 0,
+                "favorite": 0,
+                "weights": _w,
+                "weights_default": DEFAULT_WEIGHTS,
+                "batch_count": 0,
+                "w_magnets": "",
+                "w_match": "",
+                "w_source": "",
+                "w_comments": "",
             },
             status_code=404,
         )
@@ -2380,18 +2581,59 @@ def scan_status():
 
 
 @app.get(
-    "/cleanup",
+    "/logs",
     response_class=HTMLResponse
 )
-def cleanup_page(request: Request):
+def logs_page(request: Request, reason: str = "", limit: int = 300):
+
+    try:
+
+        limit = int(limit or 300)
+
+    except (TypeError, ValueError):
+
+        limit = 300
+
+    limit = max(1, min(limit, 2000))
+
+    summary, entries, total, note = _load_filter_log(reason, limit)
 
     return templates.TemplateResponse(
         request,
-        "cleanup.html",
+        "logs.html",
         {
             "stats": library_stats(),
+            "summary": summary,
+            "entries": entries,
+            "total": total,
+            "reason": reason,
+            "limit": limit,
+            "note": note,
         }
     )
+
+
+@app.get(
+    "/maintenance",
+    response_class=HTMLResponse
+)
+def maintenance_page(request: Request):
+    """维护页：备份、导出、低分清理、空目录、日志。
+
+    这些功能原先散在首页（备份/导出/低分）与独立页（空目录/日志）。
+    收拢到这里，首页只留日常要按的按钮。
+    """
+
+    return templates.TemplateResponse(
+        request,
+        "maintenance.html",
+        {"stats": library_stats()}
+    )
+
+
+
+
+
 
 
 # ── 筛选日志页 ──────────────────────────────────────────────
@@ -2432,6 +2674,9 @@ def _format_log_entries(entries):
     return out
 
 
+
+
+
 def _load_filter_log(reason="", limit=300):
     """取筛选日志：(汇总, 明细, 总数, 提示)。库没建时返回空，不 500。"""
 
@@ -2467,37 +2712,145 @@ def _load_filter_log(reason="", limit=300):
         return [], [], 0, "{}: {}".format(type(exc).__name__, exc)
 
 
+@app.get("/cleanup")
+def legacy_cleanup_redirect():
+    """空目录已并入维护页（/maintenance）。保留跳转，别让旧书签失效。"""
+
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse("/maintenance", status_code=302)
+
+
 @app.get(
-    "/logs",
+    "/settings",
     response_class=HTMLResponse
 )
-def logs_page(request: Request, reason: str = "", limit: int = 300):
+def settings_page(request: Request, saved: str = ""):
 
-    try:
-
-        limit = int(limit or 300)
-
-    except (TypeError, ValueError):
-
-        limit = 300
-
-    limit = max(1, min(limit, 2000))
-
-    summary, entries, total, note = _load_filter_log(reason, limit)
+    from core import runtime_settings as RS
 
     return templates.TemplateResponse(
         request,
-        "logs.html",
+        "settings.html",
         {
             "stats": library_stats(),
-            "summary": summary,
-            "entries": entries,
-            "total": total,
-            "reason": reason,
-            "limit": limit,
-            "note": note,
+            "cur": RS.snapshot(),
+            "saved": saved,
+            "saved_note": "",
+            "error": "",
         }
     )
+
+
+@app.post("/settings", response_class=HTMLResponse)
+async def settings_save(request: Request):
+    """保存数据源设置。写到 storage/settings.json（**不碰 config.yaml**）。"""
+
+    from core import runtime_settings as RS
+
+    form = await request.form()
+
+    values = {k: form.get(k) for k in RS.EDITABLE_KEYS if k in form}
+
+    ok, note = RS.save(values)
+
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {
+            "stats": library_stats(),
+            "cur": RS.snapshot(),
+            "saved": "1" if ok else "",
+            "saved_note": "（{}）".format(note) if ok else "",
+            "error": "" if ok else note,
+        }
+    )
+
+
+@app.post("/api/settings/test")
+def api_settings_test():
+    """实测两个数据源通不通。
+
+    这一步很关键：代理端口是使用者自己填的，填错了得**当场知道**，
+    而不是等批量抓取时一片超时。
+    """
+
+    from core import runtime_settings as RS
+
+    results = []
+
+    # ── JavDB ──
+    try:
+
+        from adapters.javdb_adapter import JavDBCLIClient
+
+        client = JavDBCLIClient()
+
+        d = client.detail("SSIS-001")
+
+        if d and d.get("number"):
+            results.append({
+                "name": "JavDB（后端 {}）".format(client.backend),
+                "ok": True,
+                "detail": "通，取到 {}".format(d.get("number")),
+            })
+        else:
+            results.append({
+                "name": "JavDB（后端 {}）".format(client.backend),
+                "ok": False,
+                "detail": "没取到数据（查一下后端是否可用）",
+            })
+
+    except Exception as exc:                                   # noqa: BLE001
+
+        results.append({
+            "name": "JavDB",
+            "ok": False,
+            "detail": "{}: {}".format(type(exc).__name__, exc),
+        })
+
+    # ── JavBus ──
+    try:
+
+        from adapters.javbus_adapter import JavBusClient
+
+        client = JavBusClient()
+
+        if not client.available():
+
+            hint = "后端 {} 不可用".format(client.backend)
+
+            if client.backend == "native" and not RS.get("javbus_proxy"):
+                hint += "（**没配代理** —— JavBus 直连会超时，去上面填代理地址）"
+
+            results.append({"name": "JavBus", "ok": False, "detail": hint})
+
+        else:
+
+            d = client.detail("SSIS-001")
+
+            if d and d.get("number"):
+                results.append({
+                    "name": "JavBus（后端 {}）".format(client.backend),
+                    "ok": True,
+                    "detail": "通，取到 {}".format(d.get("number")),
+                })
+            else:
+                results.append({
+                    "name": "JavBus（后端 {}）".format(client.backend),
+                    "ok": False,
+                    "detail": "连得上但没取到详情",
+                })
+
+    except Exception as exc:                                   # noqa: BLE001
+
+        results.append({
+            "name": "JavBus",
+            "ok": False,
+            "detail": "{}: {}".format(type(exc).__name__, exc),
+        })
+
+    return JSONResponse({"results": results})
 
 
 @app.get("/api/filter-log/export")

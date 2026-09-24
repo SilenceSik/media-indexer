@@ -10,6 +10,12 @@ mcp==2.0.0
 # Send2Trash : web/app.py -> services/file_service.py
 # 删除一律走回收站，绝不永久删除（README「没有磁力就不许删」配套约束）
 Send2Trash>=1.8
+# requests : core/javdb_native.py -> core/javbus_native.py
+# JavDB / JavBus 的原生 HTTP 客户端（**v2 主线路径**）。
+# 2026-09-24 从「v1 遗留」移到核心：这两个客户端是为了去掉
+# javdb CLI 二进制与 javbus-api 服务而写的，属于主链。
+# socks 代理还需 PySocks（可选，用 socks5 出口时才需要）。
+requests>=2.31
 
 # ── Web 控制台（web/app.py）───────────────────────────────────
 fastapi>=0.110
@@ -17,11 +23,19 @@ uvicorn>=0.27
 jinja2>=3.1
 
 # ── v1 遗留链路（仅 v1 入口脚本用到）──────────────────────────
-# requests  : core/image_cache.py -> core/metadata.py -> metadata_update.py
 # schedule  : core/scheduler.py（v2 主线下无人引用，见 P2-1）
 # watchdog  : core/watcher.py  （v2 主线下无人引用，见 P2-1）
-# 不跑 v1 遗留代码可以不装这三个。
+# 不跑 v1 遗留代码可以不装这两个。
 # tqdm 已移除：全仓库零 import（AST 核对）。
-requests>=2.31
 # schedule>=1.2
 # watchdog>=4.0
+
+# ── 外部程序依赖（2026-09-24 起逐步去掉）──────────────────────
+# ffmpeg/ffprobe : 时长探测**已**改走 core/duration_probe.py（纯 Python 容器头
+#                  解析，实测与 ffprobe 最大相对差 0.0034%）。ffprobe 只作可选
+#                  兜底，没有也能跑全部功能。
+# javbus-api     : 已有 core/javbus_native.py（直接抓网页）；适配器加了
+#                  service/native 开关，**默认仍是 service**，待对拍后切。
+# javdb CLI      : 已有 core/javdb_native.py（App API 原生直连，实测与 CLI
+#                  8/8 字段一致）；**尚未接进适配器**，当前仍走 CLI。
+

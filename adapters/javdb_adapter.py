@@ -1,7 +1,55 @@
 import json
+import os
 import subprocess
 
 import time
+
+# ═══════════════════════ 后端开关（2026-09-24）
+
+# `JavDBCLIClient` 有两个后端，**产出同样的 stdout**，所以上层 15 个方法
+# 一行不用改：
+#
+#   cli    -> 调 `javdb` 二进制（原行为，**仍是默认**）
+#   native -> core.javdb_native 直连 App API +
+#             adapters.javdb_cli_compat 仿真 CLI 输出
+#
+# 默认仍是 `cli`：**不改变现有行为**，等对拍通过再切。
+#
+# 配置：config.yaml 的 `javdb.backend`，或环境变量 `LMM_JAVDB_BACKEND`
+# （环境变量优先，便于临时试验）。
+_VALID_BACKENDS = ("cli", "native")
+
+
+def resolve_backend(configured=None):
+    """决定用哪个后端。
+
+    优先级：构造参数 > 环境变量 `LMM_JAVDB_BACKEND` > config.yaml > 默认 cli。
+    """
+
+    if configured:
+        value = str(configured).strip().lower()
+        if value in _VALID_BACKENDS:
+            return value
+
+    from core.datasource_config import get_backend
+
+    # 默认 native：公开仓拿到手就能跑，不必先装那个 17.8MB 的二进制。
+    # 实测与 cli 后端 11 个番号字段全一致（40/40 ~ 41/41）。
+    # 需要退回外部程序时在设置页选 cli，或设 LMM_JAVDB_BACKEND=cli。
+    return get_backend("javdb", "LMM_JAVDB_BACKEND",
+                       _VALID_BACKENDS, "native")
+
+
+def resolve_proxy(configured=None):
+    """native 后端用的代理。None/空 = 用系统环境变量。"""
+
+    if configured:
+        return str(configured).strip() or None
+
+    from core.datasource_config import get_proxy
+
+    return get_proxy("javdb", "LMM_JAVDB_PROXY")
+
 
 # 截图缺失重试。2026-09-24 实测：批量跑时 `assets list` 偶发只返回封面两条，
 # 第 3 条起的 /samples/ 全丢（FC2-PPV-1115273 批量 0 张、单跑 10 张）。
@@ -75,7 +123,10 @@ class JavDBCLIClient:
         command="javdb",
         extra_path=None,  # 装好 javdb CLI 后放进 PATH 即可
         timeout=120,
-        home=None
+        home=None,
+        backend=None,
+        proxy=None,
+        native=None,
     ):
 
         self.command = command
@@ -90,6 +141,23 @@ class JavDBCLIClient:
         # 用途是**并发**：磁力查询实测不需要登录态，隔离后既不会并发写坏
         # auth.json，也没有登录账号可被风控（主人 2026-09-24 定的方案）。
         self.home = home
+
+        # ── 后端开关（2026-09-24）──
+        #
+        #   cli    -> 调 `javdb` 二进制（原行为，**仍是默认**）
+        #   native -> 走 core.javdb_native 直连 App API，由
+        #             adapters.javdb_cli_compat 仿真 CLI 的 stdout
+        #
+        # 默认不变，等对拍通过再切。见 skill hermes-* / 项目 README。
+        self.backend = resolve_backend(backend)
+
+        self._compat = native
+
+        if self.backend == "native" and self._compat is None:
+
+            from adapters.javdb_cli_compat import JavDBCommandCompat
+
+            self._compat = JavDBCommandCompat(proxy=resolve_proxy(proxy))
 
     def _env(self):
         """javdb 装在用户 bin 目录，子进程要能找得到。"""
@@ -110,6 +178,16 @@ class JavDBCLIClient:
         return env
 
     def _run(self, args, timeout=None):
+        """执行一条「CLI 命令」。
+
+        `backend=cli` 时真起子进程；`native` 时交给
+        `adapters.javdb_cli_compat` 仿真 —— **两者返回同样的 stdout**，
+        所以调用方（本类其余方法）一行不用改。
+        """
+
+        if self.backend == "native":
+
+            return self._compat.run(args, timeout=timeout)
 
         result = subprocess.run(
             [self.command] + args,
@@ -398,7 +476,16 @@ class JavDBCLIClient:
 
             return None
 
-        merged = None
+        # ⚠️ 这里**不能**用「第一个成功的就是主版本」——
+        # 上游 search 返回的**顺序每次都可能不同**（实测同一番号两次调用
+        # 分别得到 [76MM91, 9bx8] 与 [9bx8, 76MM91]），于是主版本会在两个
+        # 版本之间**随机飘**，卡片上的标题/封面跟着变。CLI 后端同样如此
+        # （三次跑出 9bx8 / 9bx8 / 76MM91）。
+        #
+        # 所以先把**所有**成功版本收齐，再按确定性的规则挑主版本：
+        #   磁力多的优先（信息最全），同数量按 id 升序。
+        # 这样同一番号每次跑结果一致，可复现。
+        fetched = []
 
         magnets = []
 
@@ -418,9 +505,7 @@ class JavDBCLIClient:
 
                 continue
 
-            if merged is None:
-
-                merged = d
+            fetched.append((mid, d))
 
             ms = d.get("magnets")
 
@@ -428,9 +513,20 @@ class JavDBCLIClient:
 
                 magnets.extend(ms)
 
-        if merged is None:
+        if not fetched:
 
             return None
+
+        def _rank(item):
+            """磁力条数降序，再按 id 升序 —— 确定性的主版本判据。"""
+
+            mid, d = item
+
+            n = len(d.get("magnets") or []) if isinstance(d, dict) else 0
+
+            return (-n, str(mid))
+
+        merged = sorted(fetched, key=_rank)[0][1]
 
         # 按 hash 去重（同一磁力可能在多版本里都出现）
         seen = set()
@@ -680,6 +776,15 @@ class JavDBCLIClient:
         `filename`：给了就用 `-o <directory>/<filename>` 指定落盘名。
         `assets list` 的默认落盘名由 CLI 自己决定（封面/截图那样正好），
         但**宣传视频要在模板里用固定路径引用**，所以得能点名。
+
+        ## ⚠️ native 后端不支持这个
+
+        `assets download` 要把 HLS（m3u8 + AES-128 分片）重封装成 mp4 ——
+        那是几百行解复用代码（上游 javdb-cli 的 media 包有 4356 行），
+        正是本次移植**明确跳过**的部分。
+
+        所以这里**如实返回空并说明原因**，不去假装成功、也不去写一个
+        半吊子的实现。需要录宣传视频的人装 javdb CLI 即可。
         """
 
         import os
@@ -687,6 +792,19 @@ class JavDBCLIClient:
         if not lines:
 
             return []
+
+        if self.backend == "native":
+
+            from adapters.javdb_cli_compat import assets_download_supported
+
+            if not assets_download_supported():
+
+                # 不抛异常（调用方按「没下到」处理），但要让原因可见
+                print("[javdb] native 后端不支持资源下载"
+                      "（HLS 重封装需要 javdb CLI）；"
+                      "已跳过 {} 条".format(len(lines)))
+
+                return []
 
         os.makedirs(directory, exist_ok=True)
 

@@ -272,7 +272,14 @@ WHERE id NOT IN (SELECT title_id FROM metadata)
 ?? services/result.py  ?? tests/
 ```
 
-⚠️ `adapters/javdb_adapter.py` 的改动已核：新增 `JavDBCLIClient`（走 `javdb` CLI 子进程 + `--json` 取数据），**不含凭据字面量**（已 grep token/password/api_key/secret/cookie 等关键词，确认为空）。但它引入了一个**外部运行依赖 `javdb` 命令**——环境里没有这个 CLI 时，元数据抓取会静默返回 `None`（代码里 `except` 直接吞掉异常）。部署前需确认该 CLI 已装。
+⚠️ `adapters/javdb_adapter.py` 的改动已核：新增 `JavDBCLIClient`，**不含凭据字面量**（已 grep token/password/api_key/secret/cookie 等关键词，确认为空）。
+
+> ✅ **已解决（2026-09-24）**：它当初引入了一个**外部运行依赖 `javdb` 命令** ——
+> 环境里没装时元数据抓取会静默返回 `None`（被 `except` 吞掉），部署前得先确认装了 CLI。
+> 现在默认走 `core/javdb_native.py`（直连 JavDB App API），**不再需要外部程序**；
+> 原有的 CLI 路径保留为可切换的后端（`LMM_JAVDB_BACKEND=cli`）。
+> 同期 JavBus 侧也做了同样处理（`core/javbus_native.py`），
+> 时长探测则改为纯 Python 容器头解析（`core/duration_probe.py`），不再依赖 ffmpeg。
 
 ---
 
