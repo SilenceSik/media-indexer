@@ -304,7 +304,25 @@ main.py / agent/server.py     入口（CLI 扫描 / MCP 服务）
 pytest tests/ -q
 ```
 
-测试覆盖：解析规则、格式白名单、增量索引、落库与重链、磁力门控、端到端链路。
+测试结果按**有没有本地语料**分两种（语料是私有的，不在仓库里）：
+
+| 环境 | 结果 |
+|---|---|
+| 无本地语料（干净克隆，默认） | `657 passed, 6 skipped` |
+| 有本地语料（开发机） | `663 passed` |
+
+跳过的那 6 条依赖真实的媒体库/校验缓存，靠 `pytest.mark.skipif` 自动跳过；
+要用自己的语料跑，用环境变量指过去：
+
+```bash
+LMM_REAL_DB=/path/to/library_v2.db \
+LMM_LEGACY_LIBRARY_DB=/path/to/library.db \
+LMM_VERIFY_CACHE=/path/to/verify_cache.json \
+pytest tests/ -q
+```
+
+测试覆盖：解析规则、格式白名单、增量索引、落库与重链、磁力门控、
+时长一致性、置信分与可调配比、删除门控与「保卡」语义、端到端链路。
 
 ## 已知缺口
 
