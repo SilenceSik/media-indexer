@@ -3,7 +3,7 @@
 保留原因：作为 v1 数据库的只读迁移参考。v2 链路不引用本文件。
 ⚠️ 本模块含真实文件移动实现（`shutil.move`）。v2 的移动走
 `services/organize_service.py`，落盘前须过删除门控（见 P0/P1 门控契约）。
-本模块已冻结：v2 为唯一主线，v1 仅作只读迁移源。
+v2 为唯一主线，v1 仅作只读迁移源。
 """
 import os
 import shutil

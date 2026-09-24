@@ -15,7 +15,7 @@ if __package__ in (None, ""):
 
 from mcp.server import MCPServer
 
-# v2 工具（唯一主线）
+# v2 工具（唯一主线，）
 from agent.tools_v2 import (
     search_media,
     add_media_file,

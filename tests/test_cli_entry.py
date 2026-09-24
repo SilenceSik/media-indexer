@@ -22,23 +22,23 @@ def test_parse_args_defaults():
 
 
 def test_parse_args_single_path():
-    args = cli_entry.parse_args([r"X:\迅雷下载"])
+    args = cli_entry.parse_args([r"E:\迅雷下载"])
 
-    assert args.paths == [r"X:\迅雷下载"]
+    assert args.paths == [r"E:\迅雷下载"]
 
 
 def test_parse_args_multiple_paths():
-    args = cli_entry.parse_args([r"X:\片", r"X:\下载"])
+    args = cli_entry.parse_args([r"E:\片", r"F:\下载"])
 
-    assert args.paths == [r"X:\片", r"X:\下载"]
+    assert args.paths == [r"E:\片", r"F:\下载"]
 
 
 def test_parse_args_flags():
-    args = cli_entry.parse_args(["--list", "--dry-run", "X:/x"])
+    args = cli_entry.parse_args(["--list", "--dry-run", "D:/x"])
 
     assert args.list_only is True
     assert args.dry_run is True
-    assert args.paths == ["X:/x"]
+    assert args.paths == ["D:/x"]
 
 
 def test_list_only_does_not_scan(tmp_path, capsys):
@@ -66,13 +66,30 @@ def test_missing_dir_is_reported_not_crashed(tmp_path, capsys):
     assert "目录不存在" in out
 
 
-def test_dry_run_writes_nothing(tmp_path, capsys):
-    """dry-run 必须不写库、不推进索引。"""
+def test_dry_run_writes_nothing(tmp_path, capsys, monkeypatch):
+    """dry-run 必须不写库、不推进索引。
 
-    video = tmp_path / "SSIS-531-uncensored.mp4"
+    ⚠️ 用**独立库**跑，不碰生产库。原版去断言 `storage/library_v2.db`，
+    结果随生产库内容变化而假失败 —— 实测：E 盘上真有
+    `SSIS-531-uncensored\\SSIS-531-uncensored.mp4`，而本用例恰好用同名文件，
+    于是「dry-run 没写库」被一个**真实存在**的行判成失败。
+
+    断言方式也改了：直接盯**自己那个库**没有新行，而不是去看别人写没写。
+    """
+
+    db = tmp_path / "dry.db"
+    idx = tmp_path / "dry_idx.db"
+
+    monkeypatch.setenv("LMM_DB", str(db))
+    monkeypatch.setenv("LMM_INDEX_DB", str(idx))
+
+    work = tmp_path / "media"
+    work.mkdir()
+
+    video = work / "SSIS-531-uncensored.mp4"
     video.write_bytes(b"x")
 
-    rc = cli_entry.main(["--dry-run", str(tmp_path)])
+    rc = cli_entry.main(["--dry-run", str(work)])
 
     out = capsys.readouterr().out
 
@@ -81,26 +98,22 @@ def test_dry_run_writes_nothing(tmp_path, capsys):
     assert "SSIS-531" in out
     assert "未写库" in out
 
-    # 生产库不该被创建/改动
-    prod = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "storage",
-        "library_v2.db",
-    )
-
-    if os.path.exists(prod):
+    # 自己的库里不该有任何 media_files
+    if db.exists():
 
         import sqlite3
 
-        c = sqlite3.connect(prod)
+        c = sqlite3.connect(str(db))
 
-        rows = list(
-            c.execute(
+        try:
+            rows = c.execute(
                 "SELECT COUNT(*) FROM media_files WHERE filepath LIKE ?",
                 (f"%{video.name}%",),
-            )
-        )
+            ).fetchone()
+        except sqlite3.OperationalError:
+
+            rows = (0,)          # 表都没建 -> 更不可能写入
 
         c.close()
 
-        assert rows[0][0] == 0, "dry-run 不得写入 media_files"
+        assert rows[0] == 0, "dry-run 不得写入 media_files"

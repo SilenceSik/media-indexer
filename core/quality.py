@@ -28,6 +28,9 @@ class QualityChecker:
 
         WHERE file_hash IS NOT NULL
 
+        -- 已送回收站的不算重复（那个副本已经不在了）
+        AND COALESCE(local_deleted, 0) = 0
+
         GROUP BY file_hash
 
         HAVING COUNT(*)>1
@@ -64,6 +67,9 @@ class QualityChecker:
         filepath
 
         FROM media_files
+
+        -- 已送回收站的是**故意删的**，不是「丢失」，别混进来
+        WHERE COALESCE(local_deleted, 0) = 0
 
         """
         ).fetchall()
@@ -119,6 +125,8 @@ class QualityChecker:
         SELECT 1 FROM media_files
 
         WHERE media_files.title_id = titles.id
+
+        AND COALESCE(media_files.local_deleted, 0) = 0
 
         )
 

@@ -63,7 +63,7 @@ def test_table_miaa(parser):
 
 
 def test_table_bare_numeric(parser):
-    """`2728927.mp4` -> 非空（无厂牌纯数字番号）。"""
+    """`2728927.mp4` -> 非空（无厂牌数字番号）。"""
     assert numbers(parser, "2728927.mp4") != []
 
 

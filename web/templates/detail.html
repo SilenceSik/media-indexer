@@ -32,9 +32,9 @@
   <div class="detail">
 
     <div class="poster">
-      <a class="card" href="{{ video.cover_file and '/images/covers/' + video.cover_file or '#' }}"
-         {% if video.cover_file %}target="_blank" rel="noopener"{% endif %}
-         title="点击看大图">
+      <a class="card" href="#"
+         {% if video.cover_file %}onclick="lbOpen(0); return false;"{% endif %}
+         title="点击看大图（← → 翻页）">
         <div class="cover-box">
           {% if video.cover_file %}
           <img class="cover" src="/images/covers/{{ video.cover_file }}" alt="{{ video.number }}">
@@ -49,6 +49,110 @@
       <h1>{{ video.number }}</h1>
       {% if video.title %}<p class="sub">{{ video.title }}</p>{% endif %}
 
+      {# ── 置信分（与首页卡片同一套口径）──
+         档位只说「服务器侧证据够不够规模」，分数才是「本地这份是不是这部片」
+         （含时长一致性）。点进详情看不到分数，是之前的缺口。 #}
+      <div class="evidence" style="margin:0.9rem 0 1.1rem">
+        {% if video.tier %}
+        <span class="tier t-{{ {'极低':'vl','低':'lo','高':'hi','极高':'vh'}.get(video.tier,'x') }}">
+          {{ video.tier }}
+        </span>
+        {% else %}
+        <span class="tier t-none" title="还没跑过抓取">未判定</span>
+        {% endif %}
+
+        <span class="conf c-{{ 'ok' if video.confidence >= 70 else ('mid' if video.confidence >= 40 else 'bad') }}"
+              title="置信分 {{ video.confidence }}/100
+服务器侧证据 {{ video.confidence_base }}（磁力/核对/来源/评论）
+× 时长一致性 {{ '%.0f'|format(video.confidence_duration * 100) }}%{% if not video.duration_known %}（未跑时长核对，本项按不扣分计）{% endif %}
+
+只用于展示与排序，不参与删除门控。">
+          {{ video.confidence }}
+        </span>
+
+        <span class="ev" title="判定为属于该番号的磁力条数（按 hash 去重）">
+          磁力 {{ video.correct_magnets if video.correct_magnets is not none else '—' }}
+        </span>
+
+        <span class="ev" title="javdb 评论数（定「极高」档用）">
+          评论 {{ video.comments_count if video.comments_count is not none else '—' }}
+        </span>
+
+        {% if video.duration_mismatch %}
+        <span class="ev bad"
+              title="本地文件的时长与元数据差得太远（{{ video.duration_note }}），
+这批文件根本不是这部片 —— 置信分已归零。
+抓元数据时会自动从媒体库剔除；磁盘文件不动。">
+          时长不符
+        </span>
+        {% elif video.duration_known and video.confidence_duration < 0.5 %}
+        <span class="ev warn"
+              title="本地文件时长与元数据差得远，可能不是这部片（或只是片段）。">
+          时长存疑
+        </span>
+        {% endif %}
+      </div>
+
+      {# ── 置信分明细（主人 09-24 要求「写置信分的详情」）──
+         只有一个数字看不出为什么低 —— 这里把每项权重、得分、扣在哪摊开。 #}
+      {% if video.breakdown %}
+      <details class="bd">
+        <summary>
+          置信分 {{ video.breakdown.score }} 怎么来的？
+          <span class="bd-eq">
+            = 服务器侧 {{ video.breakdown.base }}
+            × 时长一致性 {{ '%.0f'|format(video.breakdown.consistency * 100) }}%
+          </span>
+        </summary>
+
+        <div class="bd-body">
+          <div class="bd-h">
+            <span>项目</span><span>权重</span><span>得分</span>
+            <span>贡献</span><span>说明</span>
+          </div>
+
+          {% for it in video.breakdown.parts %}
+          <div class="bd-row">
+            <span class="bd-k">{{ it.label }}</span>
+            <span class="bd-w">{{ '%.0f'|format(it.weight * 100) }}%</span>
+            <span class="bd-v">{{ '%.0f'|format(it.value * 100) }}%</span>
+            <span class="bd-p">{{ it.points }}</span>
+            <span class="bd-n">{{ it.note }}</span>
+          </div>
+          {% endfor %}
+
+          <div class="bd-row bd-sum">
+            <span class="bd-k">服务器侧合计</span>
+            <span class="bd-w">100%</span>
+            <span class="bd-v">—</span>
+            <span class="bd-p">{{ video.breakdown.base }}</span>
+            <span class="bd-n">上面四项之和（满分 100）</span>
+          </div>
+
+          <div class="bd-row bd-dur">
+            <span class="bd-k">时长一致性</span>
+            <span class="bd-w">乘性</span>
+            <span class="bd-v">
+              {{ '%.0f'|format(video.breakdown.duration.value * 100) }}%
+            </span>
+            <span class="bd-p">
+              ×{{ '%.2f'|format(video.breakdown.duration.value) }}
+            </span>
+            <span class="bd-n">{{ video.breakdown.duration.note }}</span>
+          </div>
+
+          <p class="bd-note">
+            最终分 = 服务器侧 × 时长一致性 =
+            {{ video.breakdown.base }} ×
+            {{ '%.2f'|format(video.breakdown.duration.value) }}
+            = <b>{{ video.breakdown.score }}</b>。
+            时长是**乘性因子**：磁力/评论/核对/来源只证明「服务器上有这个号」，
+            只有时长直接检验「本地这份就是这部片」。
+          </p>
+        </div>
+      </details>
+      {% endif %}
+
       <dl class="spec">
         <div><dt>文件</dt><dd class="mono">{{ video.file_count }} 个</dd></div>
         <div><dt>占用</dt><dd class="mono">{{ video.size_h }}</dd></div>
@@ -58,15 +162,85 @@
         {% if video.tags %}<div><dt>标签</dt><dd>{{ video.tags }}</dd></div>{% endif %}
       </dl>
 
-      {% if video.screenshots %}
-      <p class="section-h">内容截图 · {{ video.screenshots|length }} 张</p>
+      {# 四个动作按钮，与首页卡片同一套门控结论 —— 首页不给的删除，
+         详情页也不给，避免点下去被服务端拒绝。 #}
+      <div class="card-actions detail-actions">
+        <button class="mini" title="打开所在文件夹"
+                onclick="act('open','{{ video.number }}',this)">位置</button>
+        {% if video.can_batch %}
+        <button class="mini danger" title="可批量删（档位够、番号核对过、识别可信、格式典型）"
+                onclick="act('delete','{{ video.number }}',this)">删除</button>
+        {% elif video.can_manual %}
+        <button class="mini danger" title="只能手动逐条删：{{ video.blocked_reason }}"
+                onclick="act('delete','{{ video.number }}',this)">删除</button>
+        {% else %}
+        <button class="mini off"
+                title="按门控规则不可删（{{ video.blocked_reason }}）"
+                disabled>删除</button>
+        {% endif %}
+        <button class="mini" title="把磁力存到项目目录"
+                onclick="act('torrent','{{ video.number }}',this)">种子</button>
+        <button class="mini" title="抓取元数据/磁力/封面截图"
+                onclick="act('enrich','{{ video.number }}',this)">抓取</button>
+      </div>
+
+      {% if video.screenshots or video.preview_video or video.preview_play %}
+      <p class="section-h">
+        内容截图{% if video.screenshots %} · {{ video.screenshots|length }} 张{% endif %}
+      </p>
       <div class="shots">
         {% for s in video.screenshots %}
-        <a class="shot" href="{{ s.url }}" target="_blank" rel="noopener">
+        <a class="shot" href="#"
+           onclick="lbOpen({{ (1 if video.cover_file else 0) + loop.index0 }}); return false;"
+           title="点击看大图（← → 翻页）">
           <img src="{{ s.url }}" alt="{{ video.number }} 截图 {{ loop.index }}" loading="lazy">
         </a>
         {% endfor %}
+
+        {# ── 宣传视频：接在截图最后（主人 09-24 要求）──
+           javdb 给的是 **HLS 的 .m3u8**（带签名会过期，分片 AES-128 加密），
+           浏览器原生不支持 HLS —— 直接点只会「转成下载」。
+           所以「存成 mp4」之后用普通 <video> 播：**不引 hls.js**，
+           存一次离线也能看。没存过就先给个按钮去存。 #}
+        {% if video.preview_play %}
+        <a class="shot shot-video" href="#play-preview"
+           onclick="playPreview(); return false;"
+           title="播放宣传视频（已存本地，离线可播）">
+          <span class="play">▶</span>
+          <span class="play-txt">宣传视频</span>
+        </a>
+        {% elif video.preview_video %}
+        <a class="shot shot-video" href="#"
+           onclick="savePreview('{{ video.number }}', this); return false;"
+           title="把宣传视频存成可播的 mp4（javdb 的 m3u8 浏览器不能直接播）">
+          <span class="play">⤓</span>
+          <span class="play-txt">存宣传视频</span>
+        </a>
+        {% endif %}
       </div>
+      {% endif %}
+
+      {# 本地播放器。`preload="metadata"` 只取头部拿时长，不预载整片。 #}
+      {% if video.preview_play %}
+      <div id="preview-player" style="display:none; margin-top:1rem">
+        <video controls preload="metadata" playsinline
+               {% if video.cover_file %}poster="/images/covers/{{ video.cover_file }}"{% endif %}
+               style="width:100%; max-width:52rem; border-radius:var(--r-md);
+                      border:1px solid var(--line); background:#000">
+          <source src="{{ video.preview_play }}" type="video/mp4">
+          你的浏览器不支持内嵌视频。
+        </video>
+      </div>
+      {% endif %}
+
+      {% if not video.preview_video %}
+      <p class="note" style="border-top:0; padding-top:0.75rem">
+        <button class="mini" id="vid-fetch"
+                onclick="fetchVideo('{{ video.number }}', this)">抓宣传视频</button>
+        <span style="color:var(--fg-faint)">
+          按需抓一次 javdb 的宣传片，接在截图最后。会存成可播的 mp4。
+        </span>
+      </p>
       {% endif %}
 
       <p class="section-h">本地文件</p>
@@ -80,13 +254,55 @@
         {% endfor %}
       </div>
 
+      {# ── 评论：位置在磁力上方（主人 09-24 要求）──
+         以前评论只参与定档（comments_count），正文从不露面。
+         正文要自己抓一次才在（「抓取评论」按钮），不自动联网。 #}
+      <p class="section-h" style="margin-top:2.5rem">
+        评论{% if video.comments %} · {{ video.comments|length }} 条{% endif %}
+        <button class="mini" id="cmt-fetch"
+                onclick="fetchComments('{{ video.number }}', this)">抓取评论</button>
+      </p>
+      {% if video.comments %}
+      <div class="cmt-list" id="cmt-list">
+        {% for c in video.comments %}
+        <div class="cmt{% if loop.index0 >= COMMENT_FOLD %} extra{% endif %}">
+          <div class="cmt-h">
+            <span class="cmt-user">{{ c.username or '匿名' }}</span>
+            {% if c.likes_count %}<span class="cmt-likes">♥ {{ c.likes_count }}</span>{% endif %}
+            {% if c.score %}<span class="cmt-score">{{ c.score }} 星</span>{% endif %}
+            <span class="cmt-when">{{ (c.created_at or '')[:10] }}</span>
+          </div>
+          <div class="cmt-body">{{ c.content }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% if video.comments|length > COMMENT_FOLD %}
+      <p class="note" style="border-top:0; padding-top:0.5rem">
+        <button class="mini" id="cmt-toggle" onclick="toggleComments(this)"
+                data-total="{{ video.comments|length }}">展开全部</button>
+        <span style="color:var(--fg-faint)">
+          默认显示前 {{ COMMENT_FOLD }} 条（按点赞数），
+          其余 {{ video.comments|length - COMMENT_FOLD }} 条折叠。
+        </span>
+      </p>
+      {% endif %}
+      {% else %}
+      <p class="note" style="border-top:0; padding-top:0; color:var(--fg-faint)">
+        还没有抓到评论正文。点上面的「抓取评论」按需拉一页（走 javdb，不自动联网）。
+      </p>
+      {% endif %}
+
       <p class="section-h" style="margin-top:2.5rem">
         磁力 · {{ video.magnets|length }} 条
+        {% if video.magnets|length > MAGNET_FOLD %}
+        <button class="mini" id="mag-toggle" onclick="toggleMagnets(this)"
+                data-total="{{ video.magnets|length }}">展开全部</button>
+        {% endif %}
       </p>
       {% if video.magnets %}
-      <div class="magnet-list">
+      <div class="magnet-list" id="mag-list">
         {% for m in video.magnets %}
-        <div class="magnet">
+        <div class="magnet{% if loop.index0 >= MAGNET_FOLD %} extra{% endif %}">
           <span class="badge {{ 'ok' if m.verified else '' }}">
             {{ '已验证' if m.verified else '候选' }}
           </span>
@@ -96,6 +312,12 @@
         </div>
         {% endfor %}
       </div>
+      {% if video.magnets|length > MAGNET_FOLD %}
+      <p class="note" id="mag-more" style="border-top:0; padding-top:0.5rem">
+        已按体积从大到小排序；默认只展开前 {{ MAGNET_FOLD }} 条，
+        其余 {{ video.magnets|length - MAGNET_FOLD }} 条点「展开全部」。
+      </p>
+      {% endif %}
       {% else %}
       <div class="empty" style="padding:2.5rem 1.5rem">
         <p>这个番号还没有磁力记录，因此<strong>不可删除</strong>。</p>
@@ -107,12 +329,227 @@
 
 </div>
 
+{# ── 图片大图弹窗 ──
+   封面与截图合成一个图集，左右箭头/方向键翻页。
+   图片地址由模板渲染进下面的 LB 数组（封面走 /images/covers/，
+   截图走 screenshot_url()，两条路径规则不同，不在 JS 里拼）。 #}
+<div class="lightbox" id="lightbox" style="display:none" onclick="lbClose()">
+  <button class="lb-x" onclick="lbClose(event)" title="关闭（Esc）">×</button>
+  <button class="lb-prev" id="lb-prev" onclick="lbStep(-1, event)" title="上一张（←）">‹</button>
+  <button class="lb-next" id="lb-next" onclick="lbStep(1, event)" title="下一张（→）">›</button>
+  <img class="lb-img" id="lb-img" src="" alt="" onclick="event.stopPropagation()">
+  <div class="lb-count" id="lb-count"></div>
+</div>
+
 <script>
+// ── 图集：封面在前，截图随后 ──
+var LB = [
+  {% if video.cover_file %}
+  { src: "/images/covers/{{ video.cover_file }}", alt: "{{ video.number }} 封面" },
+  {% endif %}
+  {% for s in video.screenshots %}
+  { src: "{{ s.url }}", alt: "{{ video.number }} 截图 {{ loop.index }}" },
+  {% endfor %}
+];
+var lbIdx = 0;
+
+function lbOpen(i) {
+  if (!LB.length) { return; }
+  lbIdx = Math.max(0, Math.min(i, LB.length - 1));
+  lbShow();
+  document.getElementById('lightbox').style.display = 'flex';
+}
+
+function lbShow() {
+  var it = LB[lbIdx];
+  document.getElementById('lb-img').src = it.src;
+  document.getElementById('lb-img').alt = it.alt;
+  document.getElementById('lb-count').textContent = (lbIdx + 1) + ' / ' + LB.length;
+
+  // 只有一张图时箭头没意义，藏掉
+  var multi = LB.length > 1;
+  document.getElementById('lb-prev').style.display = multi ? '' : 'none';
+  document.getElementById('lb-next').style.display = multi ? '' : 'none';
+}
+
+function lbStep(d, ev) {
+  if (ev) { ev.stopPropagation(); }
+  if (LB.length < 2) { return; }
+  // 首尾环绕，翻到头不用回头找
+  lbIdx = (lbIdx + d + LB.length) % LB.length;
+  lbShow();
+}
+
+function lbClose(ev) {
+  if (ev) { ev.stopPropagation(); }
+  document.getElementById('lightbox').style.display = 'none';
+}
+
+document.addEventListener('keydown', function (e) {
+  var box = document.getElementById('lightbox');
+  if (!box || box.style.display === 'none') { return; }
+
+  if (e.key === 'Escape') { lbClose(); }
+  else if (e.key === 'ArrowLeft') { lbStep(-1); }
+  else if (e.key === 'ArrowRight') { lbStep(1); }
+});
+
 function copyMagnet(btn, text) {
   navigator.clipboard.writeText(text).then(function () {
     var old = btn.textContent;
     btn.textContent = '已复制';
     setTimeout(function () { btn.textContent = old; }, 1400);
+  });
+}
+
+// ── 磁力折叠：超过 MAGNET_FOLD 条的默认收起 ──────────────
+// 只切 .extra 的显隐，重排交给 CSS（.extra { display:none }）。
+function toggleMagnets(btn) {
+  var list = document.getElementById('mag-list');
+  if (!list) { return; }
+
+  var open = list.classList.toggle('open');
+  var total = btn.dataset.total;
+  var fold = parseInt(btn.dataset.fold || '20', 10);
+
+  btn.textContent = open ? '收起' : '展开全部';
+  var more = document.getElementById('mag-more');
+  if (more) { more.style.display = open ? 'none' : ''; }
+}
+
+// ── 宣传视频：按需抓一次链接（会过期，所以不预抓）─────────
+function fetchVideo(number, btn) {
+  var label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '抓取中…';
+
+  post('/api/preview-video/' + encodeURIComponent(number)).then(function (res) {
+    if (!res.j.ok) {
+      btn.disabled = false;
+      btn.textContent = label;
+      alert(number + '：' + (res.j.error || '没抓到'));
+      return;
+    }
+    location.reload();
+  }).catch(function (e) {
+    btn.disabled = false;
+    btn.textContent = label;
+    alert('请求失败：' + e);
+  });
+}
+
+// ── 宣传视频：播放 / 存成可播的 mp4 ────────────────────────
+function playPreview() {
+  var box = document.getElementById('preview-player');
+  if (!box) { return; }
+  box.style.display = 'block';
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  var v = box.querySelector('video');
+  if (v) { v.play().catch(function () { /* 自动播放被拦就等用户点 */ }); }
+}
+
+// javdb 给的是 HLS 的 .m3u8，浏览器原生不认（点了只会下载），
+// 所以这里让后端把它存成 mp4，再刷新页面用 <video> 播。
+function savePreview(number, btn) {
+  var label = btn.querySelector('.play-txt');
+  btn.style.pointerEvents = 'none';
+  if (label) { label.textContent = '存中…'; }
+
+  post('/api/preview-video/' + encodeURIComponent(number)).then(function (res) {
+    if (!res.j.ok) {
+      btn.style.pointerEvents = '';
+      if (label) { label.textContent = '存宣传视频'; }
+      alert(number + '：' + (res.j.error || '没存下来'));
+      return;
+    }
+    location.reload();
+  }).catch(function (e) {
+    btn.style.pointerEvents = '';
+    if (label) { label.textContent = '存宣传视频'; }
+    alert('请求失败：' + e);
+  });
+}
+
+// ── 评论折叠：默认只显示前 COMMENT_FOLD 条 ────────────────
+function toggleComments(btn) {
+  var list = document.getElementById('cmt-list');
+  if (!list) { return; }
+
+  var open = list.classList.toggle('open');
+
+  btn.textContent = open ? '收起' : '展开全部';
+}
+
+// ── 评论：按需抓一页（不自动联网）─────────────────────────
+function fetchComments(number, btn) {
+  var label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '抓取中…';
+
+  post('/api/comments/' + encodeURIComponent(number)).then(function (res) {
+    if (!res.j.ok) {
+      btn.disabled = false;
+      btn.textContent = label;
+      alert(number + '：' + (res.j.error || '抓取失败'));
+      return;
+    }
+
+    // 拿到就重载页面 —— 评论区由服务端渲染，避免前端再拼一遍
+    // 同样的转义与排序逻辑（两处实现迟早会不一致）。
+    location.reload();
+
+  }).catch(function (e) {
+    btn.disabled = false;
+    btn.textContent = label;
+    alert('请求失败：' + e);
+  });
+}
+
+function post(url, body) {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : '{}'
+  }).then(function (r) {
+    return r.json().then(function (j) { return { status: r.status, j: j }; });
+  });
+}
+
+// 与首页卡片同源的四个动作：位置 / 删除 / 种子 / 抓取。
+// 门控结论由后端在渲染时给出，这里只负责发请求与回执。
+function act(kind, number, btn) {
+  // 与首页卡片同一套确认（主人 09-24 要求）。
+  if (kind === 'delete') {
+    if (!confirm('把 ' + number + ' 的本地文件送进回收站？\n\n'
+        + '· 走回收站，随时可恢复\n'
+        + '· 卡片不会删除（保留番号/元数据/磁力，以后可重下）')) {
+      return;
+    }
+  }
+
+  var label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  post('/api/' + kind + '/' + encodeURIComponent(number)).then(function (res) {
+    var msg = res.j.message || res.j.error || (res.j.ok ? '完成' : '失败');
+
+    btn.textContent = res.j.ok ? '✓' : '✗';
+    btn.title = msg;
+
+    if (!res.j.ok) {
+      alert(number + '：' + msg);
+    }
+
+    setTimeout(function () {
+      btn.textContent = label;
+      btn.disabled = false;
+    }, 1600);
+
+  }).catch(function (e) {
+    btn.textContent = label;
+    btn.disabled = false;
+    alert('请求失败：' + e);
   });
 }
 </script>

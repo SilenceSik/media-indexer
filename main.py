@@ -6,8 +6,8 @@ v2 是唯一主线。旧实现保留在 git 历史里。
 用法::
 
     python main.py                          # 扫 config.yaml 的 scan_paths
-    python main.py "X:\\迅雷下载"            # 只扫指定目录（覆盖 scan_paths）
-    python main.py "X:\\片" "X:\\下载"       # 扫多个目录
+    python main.py "X:\\downloads"            # 只扫指定目录（覆盖 scan_paths）
+    python main.py "X:\\片" "X:\\dl-other"       # 扫多个目录
     python main.py --list                   # 只列出将要扫描的目录，不执行
 
 **命令行传的目录同样受格式白名单与目录排除约束** —— 它们是安全防线，
@@ -49,6 +49,25 @@ def load_config():
     ) as fh:
 
         return yaml.safe_load(fh) or {}
+
+
+def resolve_db_paths(config):
+    """解析库路径，支持**环境变量覆盖**。
+
+    `LMM_DB` / `LMM_INDEX_DB` 让测试与验收能跑在独立库上，不碰生产库
+    （WebUI 侧早就在用 `LMM_DB`；CLI 这里对齐，否则测试只能去断言生产库 ——
+    那会让「dry-run 不写库」这类用例随生产库内容变化而假失败）。
+    """
+
+    database = os.environ.get("LMM_DB") or config["database"]
+
+    index_db = (
+        os.environ.get("LMM_INDEX_DB")
+        or config.get("index_db")
+        or "storage/file_index_v2.db"
+    )
+
+    return resolve_path(database), resolve_path(index_db)
 
 
 def load_rules(path):
@@ -137,37 +156,39 @@ def main(argv=None):
 
     config = load_config()
 
-    database = resolve_path(
-        config["database"]
-    )
-
-    index_db = resolve_path(
-        config.get("index_db")
-        or "storage/file_index_v2.db"
-    )
+    database, index_db = resolve_db_paths(config)
 
     rules = load_rules(
         resolve_path(config["dictionary"])
     )
 
-    # 命令行给了路径就用命令行，否则回退 config
+    # 命令行给了路径就用命令行，否则按 scan_scope 算
     if args.paths:
 
         targets = list(args.paths)
 
         source = "命令行"
 
+        notes = []
+
     else:
 
-        targets = list(
-            config.get("scan_paths") or []
-        )
+        from core.scan_scope import resolve_targets
 
-        source = "config.yaml"
+        targets, notes = resolve_targets(config)
+
+        source = "scan_scope"
 
     if not targets:
 
-        print("没有要扫描的目录：命令行未给路径，config.yaml 的 scan_paths 也是空的。")
+        print("没有要扫描的目录。")
+        print()
+
+        for n in notes:
+            print("  " + n)
+
+        print()
+        print("检查 config.yaml 的 scan_scope / known_paths。")
 
         return 1
 
@@ -180,6 +201,10 @@ def main(argv=None):
         note = "" if os.path.isdir(path) else "   <- 目录不存在"
 
         print(f"{mark}{path}{note}")
+
+    # scan_scope 的决策说明（哪个盘为什么扫/不扫）
+    for n in notes:
+        print("    · " + n)
 
     if args.list_only:
 
@@ -194,7 +219,6 @@ def main(argv=None):
         rules,
         db=db
     )
-
     total_files = 0
     total_saved = 0
     total_skipped = 0
@@ -232,6 +256,27 @@ def main(argv=None):
 
         print(f"\nScanning: {path}")
 
+        # 筛选日志：被挡下的都留痕（CLI 与 Web 两条路都要写）
+        from core import filter_log
+
+        def _on_size_skip(path_, size_, limit_, is_min):
+
+            filter_log.record(
+                db,
+                path=path_,
+                filename=os.path.basename(path_),
+                size=size_,
+                reason="size_below_min" if is_min else "size_above_max",
+                detail=(
+                    "{} {}（实际 {:.1f} MB）".format(
+                        "小于下限" if is_min else "超过上限",
+                        "{:.0f} MB".format(limit_ / 1024 / 1024),
+                        size_ / 1024 / 1024,
+                    )
+                ),
+                stage="scan",
+            )
+
         result = service.scan(
             path,
             persist=not args.dry_run,
@@ -239,9 +284,38 @@ def main(argv=None):
             max_conf=args.max_conf,
             min_size=min_size_bytes,
             max_size=max_size_bytes,
+            on_size_skip=_on_size_skip,
         )
 
         rows = result["data"]
+
+        # 识别不出 / 置信度不够的也进日志
+        for row in rows:
+
+            if not row["numbers"]:
+
+                filter_log.record(
+                    db,
+                    path=row["file"],
+                    filename=os.path.basename(row["file"]),
+                    reason="not_recognized",
+                    stage="scan",
+                )
+
+            elif row.get("skipped"):
+
+                filter_log.record(
+                    db,
+                    path=row["file"],
+                    filename=os.path.basename(row["file"]),
+                    number=row["skipped"].get("number"),
+                    confidence=row["skipped"].get("confidence"),
+                    reason="confidence_out_of_range",
+                    detail=row["skipped"].get("reason") or "",
+                    stage="scan",
+                )
+
+        filter_log.flush(db)
 
         persisted = sum(
             1 for row in rows if row["persisted"]

@@ -51,9 +51,9 @@ DETAIL = {
     "actors": [{"name": "桃谷エリカ"}],
     "tags": [{"name": "多P"}],
     "magnets": [
-        {"hash": "aaa", "name": "n1", "size": 5880},
-        {"hash": "bbb", "name": "n2", "size": 700},
-        {"hash": "ccc", "name": "n3"},
+        {"hash": "aaa", "name": "ABP-171.mp4", "size": 5880},
+        {"hash": "bbb", "name": "[FHD]abp-171.mp4", "size": 700},
+        {"hash": "ccc", "name": "ABP-171-UC.torrent.非同厂版本"},
     ],
 }
 
@@ -89,6 +89,10 @@ def test_enrich_writes_metadata_and_magnets(env):
     mags = db.magnets_for_title("ABP-171")
 
     assert len(mags) == 3
+
+    # verified 的语义已收紧（P0-1）：只有**判定为属于该番号**的磁力才标 1。
+    # 旧实现无条件写 1 —— 1 条挂错的磁力就能让门控放行删除。
+    # 这里三条名字都含 ABP-171，所以三条都该是 1。
     assert all(m["verified"] == 1 for m in mags)
 
 

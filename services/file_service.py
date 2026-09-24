@@ -10,7 +10,6 @@
 
 import os
 import subprocess
-import sys
 
 
 class FileService:
@@ -74,13 +73,14 @@ class FileService:
         }
 
     def files_of(self, number):
-        """该番号在库里的全部本地文件路径。"""
+        """该番号在库里的**存活**本地文件路径（不含已送回收站的）。"""
 
         title_id = self.db.get_or_create_title(number)
 
         rows = self.db.conn.execute(
             """
-            SELECT filepath FROM media_files WHERE title_id=?
+            SELECT filepath FROM media_files
+            WHERE title_id=? AND COALESCE(local_deleted, 0) = 0
             """,
             (
                 title_id,
@@ -89,21 +89,92 @@ class FileService:
 
         return [r["filepath"] for r in rows]
 
-    def delete_title(self, number):
-        """把该番号的本地文件送回收站。返回 (是否成功, 消息, 明细)。
+    def batch_candidates(self):
+        """批量送回收站的候选（`deletion_eligibility()` 里 `batch=True` 的）。
 
-        **只消费 deletable_titles()**：不在可删清单里的直接拒绝，不做例外。
+        **只读**，给弹窗预览用 —— 主人要的「一键」必须先看得见要动什么：
+        哪几部、几个文件、腾出多少空间。
+
+        复用门控的结论，不另立判据：`batch=True` 已经要求
+        档位>=高 + 番号核对通过 + 可信识别形态 + 格式典型。
         """
 
-        allowed = self.deletable_index()
+        out = []
 
-        if number not in allowed:
+        try:
 
-            return False, "该番号没有已验证磁力，按门控规则不可删除", {
-                "deleted": [],
-                "missing": [],
-                "failed": [],
-            }
+            rows = self.db.deletion_eligibility()
+
+        except Exception:                                       # noqa: BLE001
+
+            return out
+
+        for e in rows:
+
+            if not e.get("batch"):
+
+                continue
+
+            if not e.get("files"):
+
+                # 番号还在但文件已删 -> 没有可删的
+                continue
+
+            out.append({
+                "number": e.get("number"),
+                "tier": e.get("tier"),
+                "files": e.get("files") or 0,
+                "bytes": e.get("bytes") or 0,
+            })
+
+        out.sort(key=lambda x: x["bytes"], reverse=True)
+
+        return out
+
+    def delete_batch(self):
+        """把「高置信可批量删」的番号文件**全部送回收站**（卡保留）。
+
+        主人 2026-09-24 要的「一键」—— 但**不是无确认的一键**：
+        界面会先弹窗列出「N 部 / X 个文件 / Y GB」，用户点确定才走到这里。
+
+        与 `delete_title` 走**同一条**落盘与标记路径（`_trash_and_mark`），
+        所以两边的行为保证一致：送回收站 + `local_deleted=1` + 卡不删。
+
+        返回汇总 `{titles, files, bytes, failed, missing}`。
+        """
+
+        cands = self.batch_candidates()
+
+        summary = {"titles": [], "files": 0, "bytes": 0,
+                   "failed": [], "missing": []}
+
+        for c in cands:
+
+            ok, _msg, detail = self.delete_title(c["number"])
+
+            if not ok:
+
+                summary["failed"].extend(detail.get("failed") or [c["number"]])
+
+            summary["titles"].append({
+                "number": c["number"],
+                "files": len(detail.get("deleted") or []),
+            })
+
+            summary["files"] += len(detail.get("deleted") or [])
+            summary["bytes"] += c["bytes"]
+            summary["missing"].extend(detail.get("missing") or [])
+
+        return summary
+
+    def _trash_and_mark(self, paths):
+        """把一组路径送回收站，并在库里标记 `local_deleted`。
+
+        抽出来给 `delete_title` / `delete_batch` 共用 —— 两边各写一份
+        迟早会漂移（一边标记一边真删），那正是「保卡」最怕的。
+        """
+
+        detail = {"deleted": [], "missing": [], "failed": []}
 
         try:
 
@@ -111,19 +182,11 @@ class FileService:
 
         except ImportError:
 
-            return False, "缺少 send2trash 依赖（pip install Send2Trash）", {
-                "deleted": [],
-                "missing": [],
-                "failed": [],
-            }
+            detail["failed"].append("缺少 send2trash 依赖（pip install Send2Trash）")
 
-        detail = {
-            "deleted": [],
-            "missing": [],
-            "failed": [],
-        }
+            return detail
 
-        for path in self.files_of(number):
+        for path in paths:
 
             if not os.path.exists(path):
 
@@ -141,23 +204,55 @@ class FileService:
 
                 detail["failed"].append(f"{path}: {exc}")
 
-        # 文件已不在磁盘 -> 从库里摘掉关联，避免下次扫描前一直挂着
+        # ── 文件已不在磁盘 -> **标记，不删行** ──
+        #
+        # 主人 2026-09-24 定：这个工具的用处是「保卡」—— 卡是这部片的档案
+        # （番号/元数据/磁力/截图），删源文件只是做磁盘管理。
+        #
+        # 早前这里是 `DELETE FROM media_files WHERE filepath=?`，而首页卡片
+        # 是 `FROM media_files JOIN titles` 驱动的 —— 行一删，**卡跟着没了**，
+        # 与意图正好相反。现在只打标记：卡留着，但本地文件数与占用归零。
+        import time as _time
+
         for path in detail["deleted"]:
 
             self.db.conn.execute(
-                "DELETE FROM media_files WHERE filepath=?",
-                (
-                    path,
-                )
+                """
+                UPDATE media_files
+                SET local_deleted = 1, deleted_time = ?
+                WHERE filepath = ?
+                """,
+                (_time.time(), path),
             )
 
         self.db.conn.commit()
+
+        return detail
+
+    def delete_title(self, number):
+        """把该番号的本地文件送回收站。返回 (是否成功, 消息, 明细)。
+
+        **只消费 `deletable_titles()`**：不在可删清单里的直接拒绝，不做例外。
+        ⚠️ 只送文件，**卡保留**（见 `_trash_and_mark` 的说明）。
+        """
+
+        allowed = self.deletable_index()
+
+        if number not in allowed:
+
+            return False, "该番号没有已验证磁力，按门控规则不可删除", {
+                "deleted": [],
+                "missing": [],
+                "failed": [],
+            }
+
+        detail = self._trash_and_mark(self.files_of(number))
 
         if detail["failed"]:
 
             return False, f"部分失败（{len(detail['failed'])} 个）", detail
 
-        return True, f"已送回收站 {len(detail['deleted'])} 个文件", detail
+        return True, f"已送回收站 {len(detail['deleted'])} 个文件（卡片保留）", detail
 
     # ------------------------------------------------------------ 保存种子
 
@@ -249,6 +344,7 @@ class FileService:
             SELECT m.filepath, m.filename, t.number
             FROM media_files m
             JOIN titles t ON t.id = m.title_id
+            WHERE COALESCE(m.local_deleted, 0) = 0
             """
         ).fetchall()
 

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>筛选日志</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="aurora"></div>
+<div class="grain"></div>
+
+<div class="wrap">
+
+  <nav class="nav">
+    <span class="brand"><span class="dot"></span>媒体库</span>
+    <div class="nav-links">
+      <a href="/">全部</a>
+      <a href="/?favorite=1">❤️ 收藏</a>
+      <a href="/?has_magnet=1">有磁力</a>
+      <a href="/?missing_meta=1">缺元数据</a>
+      <a href="/scan">扫描</a>
+      <a href="/cleanup">空目录</a>
+      <a href="/logs" class="on">筛选日志</a>
+    </div>
+    <form class="search" action="/search" method="get">
+      <input name="q" placeholder="搜索番号" autocomplete="off">
+      <button type="submit">搜索</button>
+    </form>
+  </nav>
+
+  <header class="hero" style="grid-template-columns:1fr; margin-bottom:2.5rem">
+    <div>
+      <h1>筛选日志</h1>
+      <p>扫描时被挡下的文件都记在这里 —— 「扫到了却没进库」时，先来这儿看是被门槛挡的、还是压根没识别出番号。</p>
+    </div>
+  </header>
+
+  {% if note %}
+  <p class="note" style="color:var(--danger)">读日志出错：{{ note }}</p>
+  {% endif %}
+
+  {# ── 按原因汇总：点一下就是筛选 ── #}
+  <p class="section-h">
+    共 {{ total }} 条
+    {% if reason %}· 当前只看「{{ reason }}」{% endif %}
+  </p>
+
+  <div class="chips">
+    <a class="chip{% if not reason %} on{% endif %}" href="/logs">
+      全部 <b>{{ total }}</b>
+    </a>
+    {% for s in summary %}
+    <a class="chip{% if reason == s.reason %} on{% endif %}"
+       href="/logs?reason={{ s.reason }}"
+       title="{{ s.reason }}">
+      {{ s.label }} <b>{{ s.count }}</b>
+    </a>
+    {% endfor %}
+  </div>
+
+  <div class="actions" style="margin:1.25rem 0">
+    <a class="ghost btn-link"
+       href="/api/filter-log/export{% if reason %}?reason={{ reason }}{% endif %}">
+      导出 CSV
+    </a>
+    {% if reason %}
+    <a class="ghost btn-link" href="/logs">清除筛选</a>
+    {% endif %}
+    <span class="hint">最多显示 {{ limit }} 条；导出取前 20000 条</span>
+  </div>
+
+  {% if entries %}
+  <div class="logtable">
+    <div class="logrow loghead">
+      <span>原因</span>
+      <span>番号</span>
+      <span>文件</span>
+      <span class="r">体积</span>
+      <span>时间</span>
+    </div>
+    {% for e in entries %}
+    <div class="logrow" title="{{ e.detail }}{% if e.path %}&#10;{{ e.path }}{% endif %}">
+      <span class="rsn">{{ e.detail or e.reason }}</span>
+      <span class="mono">{{ e.number or '—' }}</span>
+      <span class="fntxt">{{ e.filename or '—' }}</span>
+      <span class="mono r">{{ e.size_h }}</span>
+      <span class="mono dim">{{ e.when }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">
+    <h3>没有记录</h3>
+    <p>
+      {% if reason %}
+      这个原因下还没有条目。
+      {% else %}
+      还没跑过扫描，或这轮扫描没有文件被挡下。
+      {% endif %}
+    </p>
+  </div>
+  {% endif %}
+
+</div>
+
+</body>
+</html>

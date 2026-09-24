@@ -79,8 +79,16 @@ def test_delete_allowed_with_verified_magnet(env):
     assert not video.exists(), "文件应已离开原位置（进回收站）"
 
 
-def test_delete_removes_media_file_row(env):
-    """删除后要摘掉 media_files 关联，否则库里一直挂着不存在的路径。"""
+def test_delete_keeps_media_file_row_but_marks_it(env):
+    """删除后**保留** media_files 行，只打 `local_deleted` 标记。
+
+    ⚠️ 这条断言在 2026-09-24 被主人校准**反转**过。旧契约是
+    「删完就 `DELETE FROM media_files`」，但那会让首页卡片消失
+    （卡片当时是 `FROM media_files JOIN titles` 驱动的）——
+    而主人要的是**保卡**：删源文件只做磁盘管理，卡是这部片的档案。
+
+    所以现在断言的是「行还在、但被标记」。
+    """
 
     db, svc, video = env
 
@@ -90,11 +98,50 @@ def test_delete_removes_media_file_row(env):
 
     svc.delete_title("ABP-171")
 
-    left = db.conn.execute(
-        "SELECT COUNT(*) FROM media_files WHERE filepath=?", (str(video),)
+    row = db.conn.execute(
+        "SELECT local_deleted FROM media_files WHERE filepath=?", (str(video),)
+    ).fetchone()
+
+    assert row is not None, "行不该被删（卡要靠它撑着）"
+    assert row[0] == 1, "应标记为本地已删"
+
+
+def test_deleted_file_no_longer_counts(env):
+    """已删的文件不再算进 files_of / 本地文件数与占用。"""
+
+    db, svc, video = env
+
+    db.add_file("ABP-171", str(video))
+
+    db.add_magnet("ABP-171", "magnet:?xt=urn:btih:ccc", verified=1)
+
+    svc.delete_title("ABP-171")
+
+    assert svc.files_of("ABP-171") == [], "已删的不该出现在存活文件里"
+
+
+def test_title_survives_deletion(env):
+    """番号行与磁力必须留着 —— 这是「保卡」的核心。"""
+
+    db, svc, video = env
+
+    db.add_file("ABP-171", str(video))
+
+    db.add_magnet("ABP-171", "magnet:?xt=urn:btih:ccc", verified=1)
+
+    svc.delete_title("ABP-171")
+
+    n_title = db.conn.execute(
+        "SELECT COUNT(*) FROM titles WHERE number='ABP-171'"
     ).fetchone()[0]
 
-    assert left == 0
+    n_magnet = db.conn.execute(
+        "SELECT COUNT(*) FROM magnets m JOIN titles t ON t.id=m.title_id "
+        "WHERE t.number='ABP-171'"
+    ).fetchone()[0]
+
+    assert n_title == 1, "番号不该消失"
+    assert n_magnet == 1, "磁力（重下的依据）不该消失"
 
 
 def test_delete_missing_file_is_tolerated(env):

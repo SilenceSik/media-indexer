@@ -1,15 +1,15 @@
-"""把「已实机验证的磁力清单」灌进框架 v2 的 `magnets` 表。
+"""把「已实机验证的磁力清单」灌进框架 v2 的 `magnets` 表（C5 / D5）。
 
 数据源（只读引用，不修改）：
 
-  verify_cache.json（默认取环境变量 LMM_VERIFY_CACHE）
+  X:\\hermes\\library\\verify_cache.json
       番号 → {status, magnets, magnet_n, matched, movie_id, ...}
       ⚠️ magnets 字段历史上出现过三种写入格式，本脚本全部处理：
-        (a) list  —— 每项含 title / size / cnsub / hd / uri
-        (b) int   —— 只有数量，无明细，需回落到 library.db 取 hash
-        (c) None  —— status='error' 查不到的番号
+        (a) list  —— 每项含 title / size / cnsub / hd / uri          （当前 271 条）
+        (b) int   —— 只有数量，无明细，需回落到 library.db 取 hash   （当前 17 条）
+        (c) None  —— status='error' 查不到的番号                     （当前 32 条）
 
-  library.db（可选，仅当显式传 --library-db 时启用）
+  X:\\hermes\\library\\library.db（可选，仅当显式传 --library-db 时启用）
       movies.magnets 列存 JSON 数组，每项含 hash / size / name ...
       hash 即 btih → 拼成 magnet:?xt=urn:btih:<hash>
 
@@ -42,9 +42,9 @@ if ROOT not in sys.path:
 
 from core.database_v2 import Database
 
-DEFAULT_CACHE = os.environ.get("LMM_VERIFY_CACHE")
+DEFAULT_CACHE = r"X:\corpus\verify_cache.json"
 
-DEFAULT_LIBRARY_DB = os.environ.get("LMM_LEGACY_LIBRARY_DB")
+DEFAULT_LIBRARY_DB = r"X:\corpus\library.db"
 
 SOURCE = "verify_cache"
 
@@ -257,10 +257,10 @@ def extract(code, entry, library):
 
 
 def load_final_list(path):
-    """读 final_list.tsv（可删文件清单：code / GB / magnets / date / path）。
+    """读 final_list.tsv（312 条可删文件清单：code / GB / magnets / date / path）。
 
-    ⚠️ tsv 的 code 是已核实好的番号，本脚本不再用框架 parser 二次解析
-    （框架 dictionary.json 的规则覆盖不了这批历史番号）。
+    ⚠️ tsv 的 code 是上一轮已核实好的番号，本脚本不再用框架 parser 二次解析
+    （框架 dictionary.json 目前只有 13 条规则、覆盖不了这批番号 —— 那是 P1-2/C3 的范围）。
     """
 
     import csv
@@ -453,7 +453,7 @@ def main(argv=None):
     parser.add_argument(
         "--library-db",
         default=None,
-        help="可选：旧版 enrich 产出的 library.db（含 btih hash）。"
+        help="可选：上一轮 javdb_enrich 产出的 library.db（含 btih hash）。"
              "不传则只吃 verify_cache 自带的 uri。",
     )
 

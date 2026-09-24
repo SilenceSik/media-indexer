@@ -1,6 +1,6 @@
 """C5 磁力 / 可删数据落点（D5）— 验收测试
 
-四组断言：
+对应的四组断言：
   1. magnets 表建立成功（列 / 唯一索引与 D5 一致）
   2. add_magnet 幂等（重复落同一条不新增行）
   3. magnets_for_title 返回正确
@@ -18,13 +18,9 @@ from core.database_v2 import Database
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-REAL_CACHE = os.environ.get(
-    "LMM_VERIFY_CACHE", os.path.join(ROOT, "samples", "verify_cache.json")
-)
+REAL_CACHE = r"X:\corpus\verify_cache.json"
 
-REAL_LIBRARY_DB = os.environ.get(
-    "LMM_LEGACY_LIBRARY_DB", os.path.join(ROOT, "samples", "library.db")
-)
+REAL_LIBRARY_DB = r"X:\corpus\library.db"
 
 
 def load_importer():
@@ -79,9 +75,15 @@ def test_magnets_table_created(tmp_path, library_db):
         r[1]: r for r in db.conn.execute("PRAGMA table_info(magnets)")
     }
 
-    assert set(cols) == {
+    # D5 的四列必须都在；此外 D9/D11 落地时新增了三列判定字段
+    # （is_correct / magnet_hash / name）—— 用子集断言，避免以后再加列
+    # 又得改一次这条测试（它是「表建对了」的契约，不是「列一个不多」的契约）。
+    assert {
         "id", "title_id", "magnet", "source", "size_text", "verified", "created_time",
-    }
+    } <= set(cols)
+
+    # D9/D11：单条磁力的判定结果
+    assert {"is_correct", "magnet_hash", "name"} <= set(cols)
 
     # D5：magnet 是 NOT NULL
     assert cols["magnet"][3] == 1
@@ -373,9 +375,7 @@ def test_real_import_feeds_deletable_titles(tmp_path, library_db):
 
     importer = load_importer()
 
-    list_path = os.environ.get(
-        "LMM_FINAL_LIST", os.path.join(ROOT, "samples", "final_list.tsv")
-    )
+    list_path = r"X:\corpus\final_list.tsv"
 
     if not os.path.exists(list_path):
 
@@ -390,15 +390,15 @@ def test_real_import_feeds_deletable_titles(tmp_path, library_db):
 
     titles = Database(library_db).deletable_titles()
 
-    assert result["stats"]["list_registered"] > 0
+    assert result["stats"]["list_registered"] == 312
 
     assert len(titles) > 0
 
     assert sum(t["total_bytes"] for t in titles) > 0
 
-    # 清单里只有一部分条目的番号能在 verify_cache / library.db 里解析出真实磁力，
-    # 而 deletable_titles() 只返回「有已验证磁力」的番号 —— 两者不必相等。
-    total_files = sum(t["file_count"] for t in titles)
-    assert 0 < total_files <= result["stats"]["list_registered"]
+    # 312 条清单里，266 条所属番号在本批数据中能解析出真实磁力（其余 46 条的番号
+    # 在 verify_cache/library.db 里都拿不到 hash，见导入报告的 unresolved 分类）。
+    # deletable_titles() 只返回「有已验证磁力」的番号，所以这里必然是 266 而非 312。
+    assert sum(t["file_count"] for t in titles) == 266
 
     assert all(t["magnet_count"] > 0 for t in titles)

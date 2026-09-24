@@ -3,7 +3,9 @@ import os
 import time
 import json
 
+from core.av_format import is_typical_av_ext
 from core.database_guard import DatabaseGuard
+from core.magnet_judge import is_trusted_recognition
 
 
 class Database:
@@ -53,6 +55,10 @@ class Database:
 
         self.create()
 
+        # 顺序要紧：先建（补齐缺失的表），再迁（给已存在的表补列）。
+        # 反过来会在新库上撞 `no such table`。
+        self.migrate()
+
     def create(self):
 
         self.create_titles()
@@ -64,6 +70,8 @@ class Database:
         self.create_file_index()
 
         self.create_magnets()
+
+        self.create_comments()
 
     def create_titles(self):
 
@@ -170,38 +178,170 @@ class Database:
 
         self.conn.commit()
 
-        self.migrate()
-
     def migrate(self):
-        """老库补列：metadata 缺 screenshots 时补上。
+        """老库补列。
 
         直接 ALTER 已存在该列的库会报 duplicate column name，先查 PRAGMA
         （与 core/file_index.py 的迁移写法一致）。
+
+        2026-09-23 新增（D9/D11 落地）：
+          * `titles.tier`            档位（极低/低/高/极高）
+          * `titles.correct_magnets` 正确磁力条数（判定器算出来的）
+          * `titles.comments_count`  javdb 评论数（定「极高」用）
+          * `titles.javdb_number`    javdb 返回的番号（D11 第二个条件）
+          * `titles.norm_number`     归一化键（比对/查重用）
+          * `titles.evidence_strong` >=10 条正确磁力（仅展示/排序）
+          * `magnets.is_correct`     这条磁力是否属于该番号
+
+        ⚠️ 只对**已存在**的表补列。表还没建就跳过 —— 新库由 `create()`
+        里的建表语句直接带上这些列，不需要 ALTER。
+        （早期版本没做这个判断，新库构造时直接 `no such table: magnets`。）
         """
 
-        columns = {
+        def add_columns(table, wanted):
+            exists = self.conn.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone()
 
-            row[1]
+            if not exists:
+                return
 
-            for row in self.conn.execute(
-            """
-            PRAGMA table_info(metadata)
-            """
-            )
+            have = {
+                row[1]
+                for row in self.conn.execute(
+                    "PRAGMA table_info({})".format(table)
+                )
+            }
 
-        }
-
-        if "screenshots" not in columns:
-
-            self.conn.execute(
-            """
-            ALTER TABLE metadata
-
-            ADD COLUMN screenshots TEXT
-            """
-            )
+            for name, decl in wanted:
+                if name not in have:
+                    self.conn.execute(
+                        "ALTER TABLE {} ADD COLUMN {} {}".format(
+                            table, name, decl
+                        )
+                    )
 
             self.conn.commit()
+
+        add_columns("metadata", [
+            ("screenshots", "TEXT"),
+
+            # 宣传视频的直接地址（javdb `assets list --type video` 给的
+            # m3u8）。主人 09-24 要求「接在截图最后、可预览」。
+            #
+            # ⚠️ 这是个**带签名的临时链接**（`?sign=...&t=...`），会过期。
+            # 所以只当"存下来备用"，抓不到就抓不到，不拿它当必须品 ——
+            # 过期后重抓一次即可。
+            ("preview_video", "TEXT"),
+        ])
+
+        # titles：档位与证据字段
+        add_columns("titles", [
+            ("tier", "TEXT"),
+            ("correct_magnets", "INTEGER"),
+            ("comments_count", "INTEGER"),
+            ("javdb_number", "TEXT"),
+            ("norm_number", "TEXT"),
+            ("evidence_strong", "INTEGER DEFAULT 0"),
+            ("lookup_state", "TEXT"),
+            ("lookup_source", "TEXT"),
+            ("number_matches", "INTEGER"),
+
+            # ❤️ 收藏位。0/1，默认 0。
+            #
+            # 主人 2026-09-24 定：收藏是**纯人工标记**，不参与任何自动判定 ——
+            # 既不抬高置信分，也不解锁删除（那是 tier/磁力门控的事）。
+            # 它的作用是「我想留着看的」，所以只用来筛选与排序。
+            ("favorite", "INTEGER DEFAULT 0"),
+        ])
+
+        # magnets：单条判定结果
+        add_columns("magnets", [
+            ("is_correct", "INTEGER DEFAULT 0"),
+            ("magnet_hash", "TEXT"),
+            ("name", "TEXT"),
+        ])
+
+        # media_files：识别来源（D11 第三条要用）
+        #
+        # `match_source` 记 matcher 是用哪种形态认出这个番号的
+        # （std / fc2 / numpfx / nosep / bare ...）。批量删要求它来自
+        # 高置信主路径 —— 无分隔符与裸数字形态不可信，见 core/magnet_judge.py。
+        add_columns("media_files", [
+            ("match_source", "TEXT"),
+            ("match_confidence", "INTEGER"),
+
+            # ── 本地文件已删（送回收站了），但**卡要留着** ──
+            #
+            # 主人 2026-09-24 定：这个工具的用处是「保卡」—— 卡是这部片的
+            # 档案（番号/元数据/磁力/截图），删源文件只是做磁盘管理。
+            # 早前删完直接 `DELETE FROM media_files`，而首页卡片是
+            # `FROM media_files JOIN titles` 驱动的，于是**卡跟着没了** ——
+            # 与意图正好相反。
+            #
+            # 现在改为**标记**：行留着（filepath 也留着做参考），
+            # 只是不再算进「本地文件数/占用」，扫描/时长/打开位置也跳过。
+            # 若文件日后又出现（重下），重扫会把它 upsert 回来并清零此位。
+            ("local_deleted", "INTEGER DEFAULT 0"),
+            ("deleted_time", "REAL"),
+            # 时长校验（**只作置信度评分，不作硬标准**）
+            #
+            # 主人 2026-09-24 定：AV 在传播时常被加几分钟广告，或同目录下
+            # 放个几分钟的番号预览片，所以时长差异**不能**当拒绝理由。
+            # 存下来供打分与展示。
+            ("duration_local", "REAL"),
+            ("duration_ref", "REAL"),
+            ("duration_ratio", "REAL"),
+        ])
+
+        # 筛选日志：**被挡下的都要留痕**（主人 2026-09-24 要求）
+        #
+        # 之前这些只存在扫描任务的**内存**里（`_SCAN_JOB["skipped_samples"]`），
+        # 任务一结束就没了 —— 用户看不到"哪些文件被筛掉了、为什么"，
+        # 也无从复查。改为落库。
+        self.conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS filter_log
+        (
+            id INTEGER PRIMARY KEY,
+
+            path TEXT,
+            filename TEXT,
+            size INTEGER,
+
+            number TEXT,
+            confidence INTEGER,
+            source TEXT,
+
+            -- 机器可读的原因码，见 core/filter_log.py 的 REASONS
+            reason TEXT,
+            -- 人话说明（给界面直接显示）
+            detail TEXT,
+            -- 发生在哪一步：scan / lookup / tier / duration / extension
+            stage TEXT,
+
+            created_time REAL
+        )
+        """
+        )
+
+        self.conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_filter_log_reason
+        ON filter_log(reason);
+        """
+        )
+
+        self.conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_filter_log_path
+        ON filter_log(path);
+        """
+        )
+
+        self.conn.commit()
 
     def create_metadata(self):
 
@@ -274,6 +414,140 @@ class Database:
 
         self.conn.commit()
 
+    def create_comments(self):
+        """javdb 的评论文本。
+
+        以前只存 `titles.comments_count`（定「极高」档用的数字），评论**正文**
+        看过就丢 —— 主人 09-24 要求把评论放进卡片，所以要落库。
+
+        去重键用 `javdb_id`（javdb 的评论 id）：同一条评论重复抓不会翻倍。
+        老库里的评论没有 id 时留空，靠 `UNIQUE` 允许 NULL 重复（SQLite 里
+        NULL 互不相等）—— 不会因此报错，只是那几条可能重复。
+        """
+
+        self.conn.executescript(
+        """
+
+        CREATE TABLE IF NOT EXISTS comments
+        (
+
+            id INTEGER PRIMARY KEY,
+
+            title_id INTEGER,
+
+            javdb_id TEXT,
+
+            content TEXT,
+
+            score INTEGER,
+
+            likes_count INTEGER,
+
+            username TEXT,
+
+            created_at TEXT,
+
+            fetched_time REAL,
+
+
+            FOREIGN KEY(title_id)
+
+            REFERENCES titles(id)
+
+        );
+
+
+        CREATE INDEX IF NOT EXISTS idx_comments_title
+
+        ON comments(title_id);
+
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_comments_javdb
+
+        ON comments(title_id, javdb_id);
+
+        """
+        )
+
+        self.conn.commit()
+
+    def save_comments(self, title_id, comments):
+        """写入评论（按 javdb_id 幂等）。返回新写入条数。
+
+        `comments` 是 `[{"content","score","likes_count","username",
+        "created_at","id"}, ...]`（字段与 javdb comments --json 的
+        reviews 对齐，缺的按 None 存）。
+        """
+
+        added = 0
+
+        for c in comments or []:
+
+            if not isinstance(c, dict) or not (c.get("content") or "").strip():
+
+                continue
+
+            try:
+
+                cur = self.conn.execute(
+                """
+                INSERT OR IGNORE INTO comments
+                (title_id, javdb_id, content, score, likes_count,
+                 username, created_at, fetched_time)
+                VALUES (?,?,?,?,?,?,?,?)
+                """,
+                (
+                    title_id,
+                    str(c.get("id")) if c.get("id") is not None else None,
+                    (c.get("content") or "").strip(),
+                    c.get("score"),
+                    c.get("likes_count"),
+                    c.get("username"),
+                    c.get("created_at"),
+                    __import__("time").time(),
+                ))
+
+                added += cur.rowcount or 0
+
+            except Exception:                                   # noqa: BLE001
+                continue
+
+        self.conn.commit()
+
+        return added
+
+    def comments_of(self, title_id, limit=20):
+        """取评论：先按赞数、再按时间。"""
+
+        try:
+
+            rows = self.conn.execute(
+            """
+            SELECT content, score, likes_count, username,
+                   created_at, javdb_id
+            FROM comments
+            WHERE title_id = ?
+            ORDER BY COALESCE(likes_count, 0) DESC,
+                     created_at DESC
+            LIMIT ?
+            """,
+            (title_id, limit)).fetchall()
+
+        except Exception:                                       # noqa: BLE001
+            return []
+
+        return [
+            {
+                "content": r["content"],
+                "score": r["score"],
+                "likes_count": r["likes_count"],
+                "username": r["username"],
+                "created_at": r["created_at"],
+                "javdb_id": r["javdb_id"],
+            }
+            for r in rows
+        ]
+
     def get_or_create_title(
         self,
         number
@@ -324,7 +598,9 @@ class Database:
         number,
         filepath,
         file_hash=None,
-        size=None
+        size=None,
+        match_source=None,
+        match_confidence=None
     ):
 
         """
@@ -366,11 +642,13 @@ class Database:
             filename,
             file_hash,
             size,
+            match_source,
+            match_confidence,
             created_time
         )
 
         VALUES
-        (?,?,?,?,?,?)
+        (?,?,?,?,?,?,?,?)
 
         ON CONFLICT(filepath) DO UPDATE SET
 
@@ -386,7 +664,25 @@ class Database:
             size = COALESCE(
                 excluded.size,
                 media_files.size
-            )
+            ),
+
+            -- 识别来源同样 COALESCE：老库重扫时若这次没带 source，
+            -- 保留上一次记下来的，别把已知信息抹成 NULL
+            -- （NULL 在 D11 第三条里等于「不可批量删」）。
+            match_source = COALESCE(
+                excluded.match_source,
+                media_files.match_source
+            ),
+
+            match_confidence = COALESCE(
+                excluded.match_confidence,
+                media_files.match_confidence
+            ),
+
+            -- 文件又出现了（重下/移回来）-> 撤销「本地已删」标记。
+            -- 扫描看到的才是事实：磁盘上有它，就不该再算作已删。
+            local_deleted = 0,
+            deleted_time = NULL
 
         """,
         (
@@ -395,6 +691,8 @@ class Database:
             os.path.basename(filepath),
             file_hash,
             size,
+            match_source,
+            match_confidence,
             time.time()
         )
         )
@@ -567,6 +865,8 @@ class Database:
         number
     ):
 
+        # 只回**存活**文件：已送回收站的路径再报给调用方，会被当成
+        # 「这东西还在磁盘上」—— 是误导。
         rows = self.conn.execute(
         """
         SELECT
@@ -586,6 +886,8 @@ class Database:
 
 
         WHERE titles.number=?
+
+        AND COALESCE(media_files.local_deleted, 0) = 0
 
         """,
         (
@@ -747,6 +1049,204 @@ class Database:
             for x in rows
         ]
 
+    def save_tier_evidence(self, title_id, evidence):
+        """把判定器的结果落到 titles / magnets。
+
+        ``evidence`` 由 `core.magnet_judge.judge()` + `tier_of()` 产出：
+            {number, correct, comments, tier, javdb_number, matches, magnets:[...]}
+
+        这段是 D9 分档与 D11 双条件的**唯一**数据来源 —— 前端展示、删除门控
+        都读这里，不各自重算（避免两处算法漂移）。
+        """
+
+        from core.magnet_judge import (
+            is_evidence_strong,
+            normalize_number,
+        )
+
+        correct = int(evidence.get("correct") or 0)
+
+        self.conn.execute(
+        """
+        UPDATE titles
+        SET tier = ?,
+            correct_magnets = ?,
+            comments_count = ?,
+            javdb_number = ?,
+            norm_number = ?,
+            evidence_strong = ?,
+            number_matches = ?,
+            lookup_source = COALESCE(?, lookup_source)
+        WHERE id = ?
+        """,
+            (
+                evidence.get("tier"),
+                correct,
+                evidence.get("comments"),
+                evidence.get("javdb_number"),
+                normalize_number(evidence.get("number") or ""),
+                1 if is_evidence_strong(correct) else 0,
+                1 if evidence.get("matches") else 0,
+                evidence.get("source"),
+                title_id,
+            ),
+        )
+
+        for m in evidence.get("magnets") or []:
+
+            self.conn.execute(
+            """
+            UPDATE magnets
+            SET is_correct = ?, magnet_hash = ?, name = ?
+            WHERE title_id = ? AND magnet = ?
+            """,
+                (
+                    1 if m.get("is_correct") else 0,
+                    m.get("hash"),
+                    m.get("name"),
+                    title_id,
+                    m.get("magnet"),
+                ),
+            )
+
+        self.conn.commit()
+
+    def deletion_eligibility(self):
+        """按 D9/D10/D11 算出每个番号的删除资格。
+
+        取代旧的 `deletable_titles()`（那个只看 `verified=1`，1 条挂错的
+        磁力就能放行 —— P0-1）。
+
+        返回 `{number, tier, correct_magnets, number_matches,
+                 batch, manual, blocked_reason, bytes, files}`：
+
+          * `batch`  = 可批量删（档位 >= 高 **且** number 核对通过）
+          * `manual` = 只能逐条手动删（档位 = 低）
+          * 极低档一律不可删（blocked_reason = 'tier_too_low'）
+
+        **没跑过判定的番号 tier 为空 -> 一律不可删。** 这是有意的：
+        宁可漏删，不可错删。跑完 M2 的查询定档后它们才会有档位。
+        """
+
+        rows = self.conn.execute(
+        """
+        SELECT
+            titles.id AS title_id,
+            titles.number AS number,
+            titles.tier AS tier,
+            titles.correct_magnets AS correct_magnets,
+            titles.number_matches AS number_matches,
+            COALESCE((
+                SELECT SUM(COALESCE(media_files.size, 0))
+                FROM media_files
+                WHERE media_files.title_id = titles.id
+                  AND COALESCE(media_files.local_deleted, 0) = 0
+            ), 0) AS bytes
+        FROM titles
+        ORDER BY titles.number
+        """
+        ).fetchall()
+
+        # 文件清单单独取。
+        #
+        # ⚠️ 不要用 `MAX(filepath)` 在 SQL 里「挑一个代表文件」—— 那取决于
+        # 字母序，而不是实质。实测后果：某番号同时有 `.mp4` 与 `.webm` 时，
+        # 判成合格还是不合格取决于哪个字母在前（初版就这样漏了 6 个）。
+        #
+        # 批量删会删掉**该番号的全部文件**，所以第三条要求**所有**文件都合格。
+        files_by_title = {}
+
+        for f in self.conn.execute(
+            # ⚠️ 必须排除**已送回收站**的文件（`local_deleted=1`）。
+            #
+            # 否则「一键送回收站」跑完一轮后，这些番号的文件行还在、
+            # 会被继续算成「可批量删」—— 实测后果：候选数一直是 285 部，
+            # 弹窗第二轮仍声称能腾 852 GB，但文件早就不在了。**误导。**
+            "SELECT title_id, filepath, match_source, match_confidence "
+            "FROM media_files WHERE COALESCE(local_deleted, 0) = 0"
+        ):
+            files_by_title.setdefault(f[0], []).append({
+                "filepath": f[1],
+                "source": f[2],
+                "confidence": f[3],
+            })
+
+        out = []
+
+        for r in rows:
+
+            tier = r["tier"]
+            matches = bool(r["number_matches"])
+
+            flist = files_by_title.get(r["title_id"], [])
+
+            total_files = len(flist)
+
+            atypical = [
+                f for f in flist
+                if not is_typical_av_ext(f["filepath"])
+            ]
+
+            untrusted = [
+                f for f in flist
+                if not is_trusted_recognition(f["source"], f["confidence"])
+            ]
+
+            if not tier:
+                batch = manual = False
+                reason = "not_evaluated"
+            elif tier == "极低":
+                batch = manual = False
+                reason = "tier_too_low"
+            elif tier == "低":
+                batch = False
+                manual = True
+                reason = "tier_low_manual_only"
+            elif not matches:
+                batch = False
+                manual = True
+                reason = "number_mismatch"
+            elif total_files and atypical:
+                # 该番号下有非典型格式的文件（`.webm`、无扩展名、
+                # 游戏内视频段……）。批量删会一并删掉它，所以整条转手动。
+                batch = False
+                manual = True
+                reason = "atypical_extension"
+            elif total_files and untrusted:
+                # 有文件不是从高置信主路径识别的（无分隔符 / 裸数字 /
+                # 剥噪音兜底）—— 这正是「识别成另一个热门码」的高发形态。
+                batch = False
+                manual = True
+                reason = "untrusted_recognition"
+            elif not total_files:
+                # 番号还在但文件已删（D13 档案）—— 没有可删的文件，
+                # 不算批量删候选。
+                batch = False
+                manual = False
+                reason = "no_files"
+            else:
+                batch = True
+                manual = True
+                reason = ""
+
+            out.append({
+                "title_id": r["title_id"],
+                "number": r["number"],
+                "tier": tier,
+                "correct_magnets": r["correct_magnets"],
+                "number_matches": matches,
+                "batch": batch,
+                "manual": manual,
+                "blocked_reason": reason,
+                "bytes": r["bytes"],
+                "files": total_files,
+                "atypical_files": len(atypical),
+                "untrusted_files": len(untrusted),
+                "file_list": flist,
+            })
+
+        return out
+
     def deletable_titles(
         self
     ):
@@ -771,11 +1271,13 @@ class Database:
                 SELECT COUNT(*)
                 FROM media_files
                 WHERE media_files.title_id = titles.id
+                  AND COALESCE(media_files.local_deleted, 0) = 0
             ) AS file_count,
             (
                 SELECT COALESCE(SUM(COALESCE(media_files.size, 0)), 0)
                 FROM media_files
                 WHERE media_files.title_id = titles.id
+                  AND COALESCE(media_files.local_deleted, 0) = 0
             ) AS total_bytes
         FROM titles
         WHERE EXISTS
@@ -798,6 +1300,7 @@ class Database:
             SELECT filepath, size
             FROM media_files
             WHERE title_id=?
+              AND COALESCE(local_deleted, 0) = 0
             ORDER BY id
             """,
             (

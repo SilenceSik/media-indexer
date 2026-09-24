@@ -251,7 +251,7 @@ WHERE id NOT IN (SELECT title_id FROM metadata)
 | `FC2-1234567.mp4` | **`''`** | ❌ 空值 |
 | `ABC-123.mp4` | `[]` | ❌ 未识别（规则表无 ABC） |
 | `MIRD-234.mp4` | `[]` | ❌ 未识别 |
-| `2728927.mp4` | `[]` | ❌ 未识别（无厂牌纯数字番号） |
+| `2728927.mp4` | `[]` | ❌ 未识别（无厂牌数字番号） |
 
 **修法：** FC2 需单独处理（`FC2-PPV-{数字}` / `FC2-{数字}` 两种形态）；补常见片商；考虑通用 `[A-Z]{2,5}-\d{3,}` 兜底规则。这是**纯配置工作**，不涉及架构。
 
@@ -361,14 +361,14 @@ hash.py     / filehash.py           javdb.py  / javdb_adapter.py
 质检必须能看到刚落的数据、扫后删文件必须被质检报出）。已做 mutation 验证：
 把质检指向另一份库（复现 P0-2 形态）→ 两条测试立刻红，恢复后 188 passed。
 
-**P2-6　番号匹配未限定格式（`video_extensions` 是死配置）** ✅ 已修（2026-09-23）
+**P2-6　AV 匹配未限定格式（`video_extensions` 是死配置）** ✅ 已修（2026-09-23）
 
 **现象：** `config.yaml` 里写着 `video_extensions`（.mp4/.mkv/.avi/.mov/.wmv/.ts），但
 `core/scanner_v2.py` 的 `os.walk` **从不过滤扩展名** —— 这个配置项从来没有被任何代码引用过。
 结果：语料里 15,593 个 `.webm` 全部进解析流程，既拖慢扫描，又制造大量低分假阳性。
 
 > **定性更正（2026-09-23 二轮实测）：** 这里原先写 `.webm` 是「录屏 / OF / 3D 动画」，
-> 经全量语料复核**不准确**。真实构成是 `X:\ga\` **成人游戏资源树**
+> 经全量语料复核**不准确**。真实构成是 `X:\ga\` / `X:\ga\` **成人游戏资源树**
 > （Ren'Py 引擎的 `game\images`、`game\movie`、`www\movies` 等），是游戏内视频段与
 > 引擎缓存名，其余为零星的 Photoshop 工具提示视频与 tumblr 片段。共同点只有一个：
 > **它们在可信档的产出是 0**。
@@ -386,7 +386,7 @@ hash.py     / filehash.py           javdb.py  / javdb_adapter.py
 **为什么是追加语义而不是覆盖：** 配置是给人手写的，覆盖语义下少写一个格式会
 **静默漏扫整类文件**；追加语义下最坏只是多扫。方向是安全的。
 
-**实测依据（26,230 条真实语料，`真实文件名快照`）：**
+**实测依据（26,230 条真实语料，`X:\corpus\codes_extracted.json`）：**
 
 | 扩展名 | 文件数 | 可信档命中（conf≥90） | 产出率 |
 |---|---|---|---|
@@ -403,9 +403,9 @@ hash.py     / filehash.py           javdb.py  / javdb_adapter.py
 
 **验证：** 出厂默认白名单保留 10,495/26,230（40.0%），过滤掉 60% 的文件，
 **被过滤掉的文件里可信档命中 = 0 个**（零静默漏扫）。
-脚本：`离线验证脚本`。
+脚本：`tools/verify_ext_whitelist.py`。
 
-**已做的 mutation 验证**（`mutation 验证脚本`，5/5 全红、还原复绿）：
+**已做的 mutation 验证**（`tools/mutation_ext_filter.py`，5/5 全红、还原复绿）：
 ① 扫描不过滤扩展名 ② 追加语义改成覆盖语义 ③ 把 `.webm` 塞回默认名单
 ④ `ScanService` 丢掉 `extensions` 透传 ⑤ 删除门控放松到 `verified>=0`。
 
@@ -486,7 +486,7 @@ $ python -m pytest tests/ -q
 ## 7. 推进顺序（已全部执行完毕）
 
 **第一步（架构决策）** ✅
-1. 确认 **v2 为唯一主线**，v1 冻结为只读迁移源 → 设计决策记录 D1
+1. 确认 **v2 为唯一主线**，v1 冻结为只读迁移源 
 2. P0-1 落库语义 → 采用 UPSERT 重链方案（见 `core/database_v2.add_file` docstring）
 3. P0-4 取 A（写入后重读快照）
 
@@ -516,7 +516,7 @@ $ python -m pytest tests/ -q
 
 **当前状态**
 ```bash
-cd X:/dev/local-media-manager
+cd <repo>
 python -m pytest tests/ -q      # → 220 passed
 git log --oneline -1
 ```

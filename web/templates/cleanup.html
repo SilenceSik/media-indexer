@@ -21,6 +21,7 @@
       <a href="/?missing_meta=1">缺元数据</a>
       <a href="/scan">扫描</a>
       <a href="/cleanup" class="on">空目录</a>
+      <a href="/logs">筛选日志</a>
     </div>
     <form class="search" action="/search" method="get">
       <input name="q" placeholder="搜索番号" autocomplete="off">
@@ -40,7 +41,10 @@
 
       <label class="field">
         <span>要扫描的目录（不给根目录）</span>
-        <input id="roots" placeholder="例如 X:\迅雷下载 或 X:\片" autocomplete="off" spellcheck="false">
+        <div class="picker">
+          <input id="roots" placeholder="点右侧按钮选择目录" readonly>
+          <button class="ghost" type="button" onclick="pickRoots()">选择目录…</button>
+        </div>
       </label>
 
       <p class="note" style="margin:0 0 1.25rem; padding-top:0; border-top:0">
@@ -67,6 +71,44 @@
 
 <script>
 var found = [];
+
+// 目录选择框（用系统原生对话框）。cleanup 支持多个目录，用 | 分隔。
+var pickLock = false;
+
+function pickRoots() {
+  if (pickLock) return;
+  pickLock = true;
+
+  var hint = document.getElementById('hint');
+  hint.textContent = '等待选择…';
+
+  fetch('/api/pick-folder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}'
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      pickLock = false;
+
+      if (!j.ok) { hint.textContent = j.error || '打开选择框失败'; return; }
+
+      if (!j.path) { hint.textContent = ''; return; }
+
+      var box = document.getElementById('roots');
+      var cur = box.value.trim();
+
+      // 已有内容就追加（支持选多个目录），重复的不加
+      if (!cur) {
+        box.value = j.path;
+      } else if (cur.split('|').indexOf(j.path) === -1) {
+        box.value = cur + '|' + j.path;
+      }
+
+      hint.textContent = '';
+    })
+    .catch(function (e) { pickLock = false; hint.textContent = '失败：' + e; });
+}
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, function (c) {

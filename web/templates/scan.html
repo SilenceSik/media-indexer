@@ -38,15 +38,36 @@
     <div class="card" style="padding:1.75rem">
 
       <label class="field">
-        <span>目录路径</span>
-        <input id="path" placeholder="例如 X:\迅雷下载" autocomplete="off" spellcheck="false">
+        <span>目录 <i class="sub">可多选，逐个添加</i></span>
+        <div class="picker">
+          <input id="path-display" placeholder="点右侧按钮添加目录" readonly>
+          <button class="ghost" type="button" onclick="pickFolderAdd()">
+            添加目录…
+          </button>
+          <button class="ghost" type="button" onclick="clearPaths()" title="清空已选目录">
+            清空
+          </button>
+        </div>
       </label>
 
-      {% if scan_paths %}
+      {# 已选目录列表（可逐个删） #}
+      <div class="chips" id="picked-box" style="display:none">
+        <span class="chips-label">已选 <b id="picked-count">0</b> 个</span>
+        <span id="picked-list"></span>
+      </div>
+
+      {% if scope_hint %}
+      <p class="note" style="margin:0 0 1rem">
+        <strong>不选的话，按 config.yaml 的 scan_scope 扫：</strong>
+        {% for h in scope_hint %}<br>· {{ h }}{% endfor %}
+      </p>
+      {% endif %}
+
+      {% if known_paths %}
       <div class="chips">
-        <span class="chips-label">config.yaml 里配的</span>
-        {% for p in scan_paths %}
-        <button class="chip" type="button" onclick="document.getElementById('path').value='{{ p }}'">{{ p }}</button>
+        <span class="chips-label">已知 AV 目录（点一下加入）</span>
+        {% for p in known_paths %}
+        <button class="chip" type="button" onclick="addPath('{{ p }}')">{{ p }}</button>
         {% endfor %}
       </div>
       {% endif %}
@@ -65,13 +86,15 @@
         <div class="conf-sliders">
           <label class="slider-row">
             <span class="slider-name">最低</span>
-            <input type="range" id="min-conf" min="0" max="100" value="0" step="5"
+            <!-- step=1：置信分是 0-100 的整数，步长 5 会让 60-69 这类
+                 区间无法表达（range 会把 69 吸附到 70）。 -->
+            <input type="range" id="min-conf" min="0" max="100" value="0" step="1"
                    oninput="syncConf()">
             <span class="slider-num mono" id="min-val">0</span>
           </label>
           <label class="slider-row">
             <span class="slider-name">最高</span>
-            <input type="range" id="max-conf" min="0" max="100" value="100" step="5"
+            <input type="range" id="max-conf" min="0" max="100" value="100" step="1"
                    oninput="syncConf()">
             <span class="slider-num mono" id="max-val">100</span>
           </label>
@@ -100,13 +123,17 @@
         <div class="conf-sliders">
           <label class="slider-row">
             <span class="slider-name">最小</span>
+            <!-- 第 0 挡 = "不限"（划到最左端即不设下限） -->
             <input type="range" id="min-size" min="0" max="9" value="0" step="1"
                    oninput="syncSize()">
             <span class="slider-num mono" id="min-size-val">不限</span>
           </label>
           <label class="slider-row">
             <span class="slider-name">最大</span>
-            <input type="range" id="max-size" min="0" max="9" value="9" step="1"
+            <!-- 从第 1 挡起步：第 0 挡的值是 0，而后端约定 0 = "该端不限制"，
+                 会让"最大 0MB"的标签实际变成全放行。上限那端（第 9 挡）才是
+                 "不限"。 -->
+            <input type="range" id="max-size" min="1" max="9" value="9" step="1"
                    oninput="syncSize()">
             <span class="slider-num mono" id="max-size-val">不限</span>
           </label>
@@ -115,8 +142,8 @@
         <div class="conf-presets">
           <button class="chip" type="button" onclick="presetSize(0,9)">不限</button>
           <button class="chip" type="button" onclick="presetSize(2,9)">≥300MB</button>
-          <button class="chip" type="button" onclick="presetSize(6,9)">≥3GB</button>
-          <button class="chip" type="button" onclick="presetSize(7,9)">≥5GB</button>
+          <button class="chip" type="button" onclick="presetSize(5,9)">≥3GB</button>
+          <button class="chip" type="button" onclick="presetSize(6,9)">≥5GB</button>
         </div>
 
         <p class="note" style="margin:0.9rem 0 0; padding-top:0; border-top:0">
@@ -136,6 +163,15 @@
         </button>
         <span class="hint" id="hint"></span>
       </div>
+
+      <label class="switch-row" style="margin-top:1rem">
+        <input type="checkbox" id="fallback">
+        <span>
+          查不到时用 JavBus 兜底
+          <i class="sub">默认由 config.yaml 的 <code>fallback</code> 决定；
+             勾上则本次强制启用。服务按需启停，不用时不会常驻。</i>
+        </span>
+      </label>
 
       <p class="note">
         「扫描并抓取磁力」会在扫描完成后，对识别出的番号依次抓取
@@ -175,8 +211,140 @@
 
 </div>
 
+<script src="/static/size_filter.js"></script>
+
 <script>
 var timer = null;
+
+// 文件夹选择框：调服务端的系统原生对话框（不手打路径）
+var pickLock = false;
+
+// ── 多目录选择：点一次加一个，可逐个删 ──
+var picked = [];
+
+function renderPicked() {
+  var box = document.getElementById('picked-box');
+  var list = document.getElementById('picked-list');
+  var cnt = document.getElementById('picked-count');
+  var disp = document.getElementById('path-display');
+
+  cnt.textContent = picked.length;
+
+  if (!picked.length) {
+    box.style.display = 'none';
+    disp.value = '';
+    return;
+  }
+
+  box.style.display = 'flex';
+
+  var html = '';
+  picked.forEach(function (p, i) {
+    html += '<span class="tag picked">' + esc(p)
+          + ' <b data-i="' + i + '" class="rm" title="移除">×</b></span>';
+  });
+  list.innerHTML = html;
+
+  disp.value = picked.length === 1 ? picked[0] : picked.length + ' 个目录';
+
+  // 绑定移除
+  list.querySelectorAll('.rm').forEach(function (el) {
+    el.onclick = function () {
+      picked.splice(parseInt(el.getAttribute('data-i'), 10), 1);
+      renderPicked();
+    };
+  });
+}
+
+function addPath(p) {
+  if (!p) return;
+  if (picked.indexOf(p) === -1) {
+    picked.push(p);
+  }
+  renderPicked();
+}
+
+function clearPaths() {
+  picked = [];
+  renderPicked();
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+// 添加一个目录（走系统原生选择框）
+function pickFolderAdd() {
+  if (pickLock) return;
+  pickLock = true;
+
+  var hint = document.getElementById('hint');
+  if (hint) { hint.textContent = '等待选择…'; }
+
+  fetch('/api/pick-folder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}'
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      pickLock = false;
+
+      if (!j.ok) {
+        if (hint) { hint.textContent = j.error || '打开选择框失败'; }
+        return;
+      }
+
+      if (!j.path) {                      // 取消
+        if (hint) { hint.textContent = ''; }
+        return;
+      }
+
+      addPath(j.path);
+      if (hint) { hint.textContent = ''; }
+    })
+    .catch(function (e) {
+      pickLock = false;
+      if (hint) { hint.textContent = '失败：' + e; }
+    });
+}
+
+function pickFolder(targetId, hintId) {
+  if (pickLock) return;
+  pickLock = true;
+
+  var hint = hintId ? document.getElementById(hintId) : null;
+  if (hint) { hint.textContent = '等待选择…'; }
+
+  fetch('/api/pick-folder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}'
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      pickLock = false;
+
+      if (!j.ok) {
+        if (hint) { hint.textContent = j.error || '打开选择框失败'; }
+        return;
+      }
+
+      if (!j.path) {                      // 取消
+        if (hint) { hint.textContent = ''; }
+        return;
+      }
+
+      document.getElementById(targetId).value = j.path;
+      if (hint) { hint.textContent = ''; }
+    })
+    .catch(function (e) {
+      pickLock = false;
+      if (hint) { hint.textContent = '失败：' + e; }
+    });
+}
 
 function syncConf() {
   var lo = parseInt(document.getElementById('min-conf').value, 10);
@@ -208,18 +376,14 @@ function preset(lo, hi) {
   syncConf();
 }
 
-// 大小档位（MB）。两端即"不限制"：min 的 0 挡 = 不限，max 的最后挡 = 不限。
-var SIZE_STOPS = [0, 100, 300, 700, 1500, 3000, 5000, 10000, 20000, 50000];
+// 大小档位与映射集中在 web/static/size_filter.js（有 node 测试锁住约定）。
+// 注意：这里不要再 `var SIZE_STOPS = LMMSize.SIZE_STOPS` —— size_filter.js
+// 已用 `const` 在全局声明同名标识符，同一全局作用域里 const 后再 var 是
+// SyntaxError，会让**整个** <script> 块解析失败（所有函数一起失效，
+// 表现是预设按钮点了没反应）。取档位一律走 LMMSize.SIZE_STOPS。
 
 function sizeLabel(idx, isMin) {
-  var mb = SIZE_STOPS[idx];
-  if (isMin && idx === 0) { return '不限'; }
-  if (!isMin && idx === SIZE_STOPS.length - 1) { return '不限'; }
-  if (mb >= 1024) {
-    var gb = mb / 1024;
-    return (gb >= 10 ? Math.round(gb) : gb.toFixed(1).replace(/\.0$/, '')) + ' GB';
-  }
-  return mb + ' MB';
+  return LMMSize.sizeLabel(idx, isMin);
 }
 
 function syncSize() {
@@ -257,7 +421,8 @@ function presetSize(lo, hi) {
 }
 
 function start(enrich) {
-  var path = document.getElementById('path').value.trim();
+  // 多目录：picked 为空就交给后端按 scan_scope 决定
+  var paths = picked.slice();
   var dry = document.getElementById('dry').checked;
   var hint = document.getElementById('hint');
 
@@ -268,11 +433,8 @@ function start(enrich) {
   var maxSizeIdx = parseInt(document.getElementById('max-size').value, 10);
 
   // 划到头 = 0（后端约定 0 表示该端不限制）
-  var minSize = (minSizeIdx === 0) ? 0 : SIZE_STOPS[minSizeIdx] * 1024 * 1024;
-  var maxSize = (maxSizeIdx === SIZE_STOPS.length - 1)
-    ? 0 : SIZE_STOPS[maxSizeIdx] * 1024 * 1024;
-
-  if (!path) { hint.textContent = '先填目录'; return; }
+  var minSize = LMMSize.sizeToBytes(minSizeIdx, true);
+  var maxSize = LMMSize.sizeToBytes(maxSizeIdx, false);
 
   if (enrich && !confirm('扫描后会对识别出的番号抓取元数据/磁力/封面/截图。\n\n会联网访问 JavDB，每条约 3-6 秒。继续？')) {
     return;
@@ -284,14 +446,22 @@ function start(enrich) {
   }
 
   hint.textContent = '';
+
+  var body = {
+    dry_run: dry, enrich: enrich,
+    min_conf: minConf, max_conf: maxConf,
+    min_size: minSize, max_size: maxSize,
+    // 三态：null = 用 config 的默认；true = 本次强制启用
+    fallback: document.getElementById('fallback').checked ? true : null
+  };
+
+  // 没选目录 -> 不传 paths，后端按 scan_scope 扫
+  if (paths.length) { body.paths = paths; }
+
   fetch('/api/scan/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      path: path, dry_run: dry, enrich: enrich,
-      min_conf: minConf, max_conf: maxConf,
-      min_size: minSize, max_size: maxSize
-    })
+    body: JSON.stringify(body)
   })
   .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
   .then(function (res) {
@@ -385,11 +555,20 @@ function render(job) {
   }
 
   if (job.skipped_samples && job.skipped_samples.length) {
-    ehtml += '<div class="joberr-h skip">置信度门槛挡下（前 '
+    ehtml += '<div class="joberr-h skip">被门槛挡下（前 '
            + job.skipped_samples.length + ' 条）</div>';
     job.skipped_samples.forEach(function (e) {
-      ehtml += '<div class="joberr-r"><span class="mono">' + esc(e.number)
-             + '</span> ' + e.confidence + ' 分 · ' + esc(e.file) + '</div>';
+      // 两类条目形状不同：大小门槛挡下的有 size/reason，置信度挡下的有
+      // number/confidence。统一按 reason 渲染，避免混在一起时冒出 undefined。
+      var left = e.number
+        ? '<span class="mono">' + esc(e.number) + '</span> '
+          + (e.confidence != null ? e.confidence + ' 分 · ' : '')
+        : '';
+      var why = e.reason
+        ? '<i>' + esc(e.reason) + '</i>'
+        : (e.size ? '<i>' + esc(e.size) + '</i>' : '');
+      ehtml += '<div class="joberr-r">' + left + esc(e.file)
+             + (why ? ' · ' + why : '') + '</div>';
     });
   }
 

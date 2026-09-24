@@ -45,7 +45,9 @@ class ScanService:
         min_conf=0,
         max_conf=100,
         min_size=0,
-        max_size=0
+        max_size=0,
+        on_size_skip=None,
+        on_discovered=None
     ):
 
         """
@@ -72,7 +74,17 @@ class ScanService:
             update_index=persist,
             min_size=min_size,
             max_size=max_size,
+            on_size_skip=on_size_skip,
         )
+
+        # 目录已经走完、待处理清单已定 —— 这时候总数才是真的。
+        #
+        # 有了这个回调，调用方**不必再预先 os.walk 一遍**去数总数
+        # （实测：对 G 盘那种 70 万文件的盘，白走一遍要多花好几分钟，
+        #  而它的产出只有 3 个番号）。
+        if on_discovered:
+
+            on_discovered(len(files))
 
         results = []
 
@@ -98,7 +110,9 @@ class ScanService:
 
                         self.persist_file(
                             best["number"],
-                            file
+                            file,
+                            source=best.get("source"),
+                            confidence=best.get("confidence"),
                         )
 
                         persisted = True
@@ -215,7 +229,9 @@ class ScanService:
     def persist_file(
         self,
         number,
-        filepath
+        filepath,
+        source=None,
+        confidence=None
     ):
 
         """
@@ -223,6 +239,9 @@ class ScanService:
 
         - 同一 filepath 番号未变 → 复用现有 title（不新建）
         - 番号变了（字典修正后重扫）→ 重链到新 title，旧关联不再挂死
+
+        ``source`` / ``confidence`` 来自 matcher，记下来供 D11 第三条判
+        「识别是否来自高置信主路径」（批量删的门槛之一）。
         """
 
         return self.db.add_file(
@@ -230,7 +249,9 @@ class ScanService:
             filepath,
             size=self.file_size(
                 filepath
-            )
+            ),
+            match_source=source,
+            match_confidence=confidence,
         )
 
     def file_size(

@@ -3,16 +3,16 @@ import os
 from core.file_index import FileIndex
 
 
-# ───────────────────────── 番号匹配的格式白名单 ─────────────────────────
+# ───────────────────────── AV 匹配的格式白名单 ─────────────────────────
 #
 # 内置默认（程序自带一套标准视频格式，开箱即用）。
 #
-# 实测依据（26,230 条真实文件名快照）：
+# 实测依据（26,230 条真实语料，X:\corpus\codes_extracted.json）：
 #   可信档（confidence >= 90）命中 231 个文件，全部落在
 #   .mp4 / .mkv / .wmv / .avi 四种格式上，其余格式贡献 0。
 #
 # 特别说明 .webm：语料里 15,593 个（占 59.4%），可信产出 0.00%。
-#   这些文件集中在 X:\ga\ 成人游戏资源树（Ren'Py 引擎的
+#   这些文件集中在 X:\ga\ / X:\ga\ 成人游戏资源树（Ren'Py 引擎的
 #   game\images、game\movie、www\movies 等目录），是游戏内视频段与
 #   引擎缓存，不含番号体系；放开白名单只会引入 1,289 条 conf=70 的
 #   假番号（含 KISS-01 / MAST-001 这类动画片段名）。
@@ -35,7 +35,7 @@ DEFAULT_VIDEO_EXTENSIONS = (
 # ───────────────────────── 目录级排除 ─────────────────────────
 #
 # 依据（26,230 条离线快照实测，2026-09-23）：
-#   X:\ga\（成人游戏资源树，Ren'Py 引擎）贡献了 71.6% 的语料、
+#   X:\ga\ 与 X:\ga\（成人游戏资源树，Ren'Py 引擎）贡献了 71.6% 的语料、
 #   268 条解析命中，但可信档产出为 0 —— 里面的 "番号" 全是游戏内视频
 #   段（...\game\images\...、...\www\movies\...）与引擎缓存名。
 #   另有 Photoshop 工具提示视频（.../tool/xxx-tool-*.webm）等软件资源。
@@ -43,7 +43,7 @@ DEFAULT_VIDEO_EXTENSIONS = (
 # 这些目录匹配出的番号是"诚实的错误匹配"——能解析出番号形态，但对象
 # 根本不是影片。按目录段排除（匹配路径的任意一段，不区分大小写）。
 DEFAULT_EXCLUDED_DIR_SEGMENTS = (
-    "ga",              # 成人游戏根目录（X:\ga\）
+    "ga",              # 成人游戏根目录（X:\ga\ / X:\ga\）
     "game",            # Ren'Py / RPG Maker 引擎资源目录
     "www",             # RPG Maker MV/MZ 网页发布目录
     "animations",      # 引擎动画目录
@@ -197,7 +197,8 @@ class Scanner:
         folder,
         update_index=True,
         min_size=0,
-        max_size=0
+        max_size=0,
+        on_size_skip=None
     ):
 
         """
@@ -249,9 +250,19 @@ class Scanner:
 
                 if min_size and stat.st_size < min_size:
 
+                    # 上报给调用方，否则用户只看到"扫了一堆但通过的是零散几个"，
+                    # 界面上 skipped_count 永远是 0，无从判断门槛是否生效。
+                    if on_size_skip:
+
+                        on_size_skip(path, stat.st_size, min_size, True)
+
                     continue
 
                 if max_size and stat.st_size > max_size:
+
+                    if on_size_skip:
+
+                        on_size_skip(path, stat.st_size, max_size, False)
 
                     continue
 

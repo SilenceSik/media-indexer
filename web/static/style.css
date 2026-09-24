@@ -317,6 +317,13 @@ body {
   flex: 1;
 }
 
+.meta .numrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .meta .num {
   font-family: var(--mono);
   font-size: 0.92rem;
@@ -328,6 +335,31 @@ body {
 }
 
 .meta .num:hover { color: var(--accent); }
+
+/* 收藏：纯人工标记。默认灰、点亮变红，不做尺寸跳动免得整行抖。 */
+.meta .fav {
+  flex: 0 0 auto;
+  background: none;
+  border: 0;
+  padding: 0 0.15rem;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.45;
+  filter: grayscale(1);
+  transition: opacity 0.18s, filter 0.18s, transform 0.18s;
+}
+
+.meta .fav:hover { opacity: 0.85; }
+
+.meta .fav.on {
+  opacity: 1;
+  filter: none;
+}
+
+.meta .fav.on:hover { transform: scale(1.15); }
+
+.meta .fav:disabled { cursor: default; }
 
 .meta .ttl {
   color: var(--fg-dim);
@@ -841,6 +873,141 @@ body {
   border-radius: var(--r-lg);
 }
 
+.modal-sep {
+  height: 1px;
+  margin: 1.5rem 0;
+  background: var(--line);
+}
+
+/* 路径选择器：只读输入 + 选择按钮 */
+.picker {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.picker input {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker .ghost {
+  flex: none;
+  font-size: 0.8rem;
+  padding: 0.6rem 1rem;
+  white-space: nowrap;
+}
+
+/* 已导出压缩包的下载链接 */
+.modal-row a.tag {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.modal-row a.tag:hover {
+  color: var(--accent);
+  border-color: rgba(52, 211, 153, 0.35);
+}
+
+/* 已选目录的标签（可逐个移除） */
+.tag.picked {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  margin: 0.15rem 0.35rem 0.15rem 0;
+  border-radius: 6px;
+  background: rgba(52, 211, 153, 0.10);
+  border: 1px solid rgba(52, 211, 153, 0.28);
+  color: var(--foreground);
+  font-size: 0.74rem;
+}
+
+.tag.picked .rm {
+  cursor: pointer;
+  color: var(--muted-foreground);
+  font-weight: 700;
+  padding: 0 0.15rem;
+  border-radius: 3px;
+}
+
+.tag.picked .rm:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.15);
+}
+
+/* 字段名旁边的小字说明 */
+.field .sub {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: var(--muted-foreground);
+  margin-left: 0.35rem;
+}
+
+/* 证据条（档位 / 正确磁力 / 评论）──
+   档位是 D9 的四档；strong 只表示证据充分，**不代表可批量删** ——
+   批量删还要过 D11 三条件，所以它不能和「删除」按钮的可用状态混同。 */
+.evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  margin: 0.35rem 0 0.2rem;
+}
+
+.tier {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.14rem 0.42rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.tier.t-vl  { color: #f87171; background: rgba(248, 113, 113, 0.10); border-color: rgba(248, 113, 113, 0.30); }
+.tier.t-lo  { color: #fbbf24; background: rgba(251, 191, 36, 0.10);  border-color: rgba(251, 191, 36, 0.30); }
+.tier.t-hi  { color: #34d399; background: rgba(52, 211, 153, 0.10);  border-color: rgba(52, 211, 153, 0.30); }
+.tier.t-vh  { color: #22d3ee; background: rgba(34, 211, 238, 0.10);  border-color: rgba(34, 211, 238, 0.30); }
+.tier.t-none { color: var(--muted-foreground); background: rgba(148, 163, 184, 0.08); border-color: rgba(148, 163, 184, 0.22); }
+
+.ev {
+  font-size: 0.66rem;
+  color: var(--muted-foreground);
+  padding: 0.1rem 0.34rem;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.07);
+  white-space: nowrap;
+}
+
+.ev.strong {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.10);
+}
+
+.ev.warn {
+  color: #fb923c;
+  background: rgba(251, 146, 60, 0.10);
+}
+
+/* 置信分：0-100，取代旧的「强证据」二值位。
+   三档配色与 .tier 保持同一套语义（低=红 / 中=黄 / 高=绿），
+   但字号更大、有边框 —— 它是卡片上最该被一眼看到的数。 */
+.conf {
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 0.14rem 0.44rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.conf.c-ok  { color: #34d399; background: rgba(52, 211, 153, 0.12); border-color: rgba(52, 211, 153, 0.32); }
+.conf.c-mid { color: #fbbf24; background: rgba(251, 191, 36, 0.12); border-color: rgba(251, 191, 36, 0.32); }
+.conf.c-bad { color: #f87171; background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.32); }
+
 /* 分数分布直方图 */
 .dist {
   display: grid;
@@ -1218,4 +1385,494 @@ a.card:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
+}
+
+
+/* ── 详情页：四个动作按钮 ──
+   .mini 在卡片里是 flex:1 平均撑开，详情页按钮少、区宽，
+   不限定宽度会拉成一整条。这里给出固定底宽。 */
+.detail-actions {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 1.1rem;
+  justify-content: flex-start;
+}
+.detail-actions .mini {
+  flex: 0 0 auto;
+  min-width: 4.2rem;
+  padding: 0.38rem 0.85rem;
+}
+
+/* ── 图片大图弹窗 ──
+   点封面或截图在本页打开，← → 翻页、Esc 关闭。 */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 4, 8, 0.92);
+  backdrop-filter: blur(6px);
+  cursor: zoom-out;
+}
+
+.lightbox .lb-img {
+  max-width: 92vw;
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: var(--r-md, 10px);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+  cursor: default;
+}
+
+/* 三颗浮动按钮共用一套外观 */
+.lightbox .lb-x,
+.lightbox .lb-prev,
+.lightbox .lb-next {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 999px;
+  transition: background 0.3s, border-color 0.3s;
+}
+
+.lightbox .lb-x:hover,
+.lightbox .lb-prev:hover,
+.lightbox .lb-next:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.lightbox .lb-x {
+  top: 1.2rem;
+  right: 1.4rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+/* 箭头贴在左右边、垂直居中：大图上翻页不用把鼠标挪回角落 */
+.lightbox .lb-prev,
+.lightbox .lb-next {
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3.2rem;
+  height: 3.2rem;
+  font-size: 2rem;
+  line-height: 1;
+  padding-bottom: 0.3rem;
+}
+.lightbox .lb-prev { left: 1.4rem; }
+.lightbox .lb-next { right: 1.4rem; }
+
+.lightbox .lb-count {
+  position: absolute;
+  bottom: 1.3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.72);
+  letter-spacing: 0.04em;
+}
+
+/* ── 筛选日志页 ──────────────────────────────────────────── */
+/* 原因筛选「药丸」：点一下就是一次筛选，当前项点亮。 */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.42rem 0.85rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+  text-decoration: none;
+  transition: color 0.18s, border-color 0.18s, background 0.18s;
+}
+
+.chip:hover {
+  color: var(--fg);
+  border-color: var(--line-hi);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.chip b {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--fg-faint);
+}
+
+.chip.on {
+  color: var(--fg);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.chip.on b { color: var(--accent); }
+
+/* .ghost 本是给 button 的，这里当 <a> 用要补回文字样式 */
+.btn-link {
+  display: inline-block;
+  text-decoration: none;
+}
+
+/* 日志表：五列固定布局，文件名那列可截断不撑宽 */
+.logtable {
+  display: grid;
+  gap: 0.1rem;
+  max-height: 46rem;
+  overflow-y: auto;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.012);
+  padding: 0.5rem 0.9rem;
+}
+
+.logrow {
+  display: grid;
+  grid-template-columns: 15rem 7rem minmax(0, 1fr) 5rem 5.5rem;
+  gap: 0.85rem;
+  align-items: baseline;
+  padding: 0.42rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 0.78rem;
+}
+
+.logrow:last-child { border-bottom: 0; }
+
+.loghead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+  color: var(--fg-faint);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--line);
+}
+
+.logrow .rsn {
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logrow .mono {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--fg-dim);
+}
+
+.logrow .r { text-align: right; }
+
+.logrow .dim { color: var(--fg-faint); }
+
+.logrow .fntxt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .logrow { grid-template-columns: 9rem 1fr 4.5rem; }
+  .logrow .fntxt, .logrow .dim { display: none; }
+}
+
+/* ── 磁力折叠 ──────────────────────────────────────────── */
+/* 超过 MAGNET_FOLD 条的默认收起（.extra 隐藏），点「展开全部」加 .open。 */
+.magnet-list .magnet.extra { display: none; }
+.magnet-list.open .magnet.extra { display: flex; }
+
+/* ── 评论 ──────────────────────────────────────────────── */
+.cmt-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.cmt {
+  padding: 0.85rem 1rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--card);
+}
+
+.cmt-h {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  margin-bottom: 0.45rem;
+  font-size: 0.72rem;
+}
+
+.cmt-user {
+  color: var(--fg-dim);
+  font-weight: 500;
+}
+
+.cmt-likes { color: var(--danger); }
+.cmt-score { color: var(--accent); }
+.cmt-when { color: var(--fg-faint); margin-left: auto; }
+
+.cmt-body {
+  color: var(--fg-dim);
+  font-size: 0.82rem;
+  line-height: 1.65;
+  /* 评论可能很长（实测有千字长文），保住换行但别撑爆卡片 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+/* ── 宣传视频：图集里的最后一张 ────────────────────────── */
+.shot-video {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--fg-dim);
+  text-decoration: none;
+  transition: color 0.18s, border-color 0.18s, background 0.18s;
+}
+
+.shot-video:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.shot-video .play { font-size: 1.5rem; }
+.shot-video .play-txt { font-size: 0.72rem; }
+
+/* ── 时长完全不符：比 warn 更重，是「本地这批文件根本不是这部片」 ── */
+.evidence .ev.bad,
+.ev.bad {
+  color: var(--danger);
+  border-color: rgba(251, 113, 133, 0.35);
+  background: rgba(251, 113, 133, 0.10);
+}
+
+/* ── 评论折叠：与磁力同一套 .extra 手法 ────────────────── */
+.cmt-list .cmt.extra { display: none; }
+.cmt-list.open .cmt.extra { display: block; }
+
+/* ── 本地宣传视频播放器 ────────────────────────────────── */
+#preview-player video {
+  display: block;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+}
+
+/* 本地文件已删：卡保留，但这行要看得出来是「空壳」而不是还在 */
+.meta .fn.gone {
+  color: var(--fg-faint);
+  font-style: italic;
+  text-decoration: line-through;
+  text-decoration-color: rgba(251, 113, 133, 0.5);
+}
+
+/* ── 置信分配比面板（首页）────────────────────────────── */
+.wpanel {
+  margin: 0 0 1.5rem;
+  padding: 0.9rem 1.1rem;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
+  background: var(--card);
+  font-size: 0.82rem;
+}
+
+.wpanel > summary {
+  cursor: pointer;
+  color: var(--fg-dim);
+  list-style: none;
+}
+
+.wpanel > summary::-webkit-details-marker { display: none; }
+
+.wpanel > summary::before {
+  content: '▸ ';
+  color: var(--accent);
+}
+
+.wpanel[open] > summary::before { content: '▾ '; }
+
+.wp-cur {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--fg-faint);
+  margin-left: 0.6rem;
+}
+
+.wp-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.9rem;
+  margin-top: 1rem;
+}
+
+.wp-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  color: var(--fg-dim);
+  font-size: 0.76rem;
+}
+
+.wp-form input[type="number"] {
+  width: 5.2rem;
+  padding: 0.42rem 0.55rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--fg);
+  font: inherit;
+  font-family: var(--mono);
+}
+
+.wp-note {
+  flex: 1 1 100%;
+  margin: 0.3rem 0 0;
+  color: var(--fg-faint);
+  font-size: 0.74rem;
+  line-height: 1.6;
+}
+
+/* ── 置信分明细（详情页）─────────────────────────────── */
+.bd {
+  margin: 0.6rem 0 1.1rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.014);
+  font-size: 0.78rem;
+}
+
+.bd > summary {
+  padding: 0.6rem 0.9rem;
+  cursor: pointer;
+  color: var(--fg-dim);
+  list-style: none;
+}
+
+.bd > summary::-webkit-details-marker { display: none; }
+
+.bd > summary::before {
+  content: '▸ ';
+  color: var(--accent);
+}
+
+.bd[open] > summary::before { content: '▾ '; }
+
+.bd-eq {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--fg-faint);
+  margin-left: 0.6rem;
+}
+
+.bd-body { padding: 0 0.9rem 0.9rem; }
+
+.bd-h, .bd-row {
+  display: grid;
+  grid-template-columns: 6rem 3.2rem 3.2rem 3.6rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.34rem 0;
+}
+
+.bd-h {
+  color: var(--fg-faint);
+  font-size: 0.7rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.bd-row { border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
+
+.bd-row .bd-w, .bd-row .bd-v, .bd-row .bd-p {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+.bd-row .bd-v { color: var(--fg-dim); }
+.bd-row .bd-p { color: var(--accent); }
+.bd-row .bd-n { color: var(--fg-faint); font-size: 0.72rem; }
+
+.bd-sum .bd-k, .bd-sum .bd-p { color: var(--fg); font-weight: 500; }
+
+.bd-dur { border-bottom: 0; }
+.bd-dur .bd-p { color: var(--danger); }
+
+.bd-note {
+  margin: 0.7rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line);
+  color: var(--fg-faint);
+  font-size: 0.73rem;
+  line-height: 1.7;
+}
+
+.bd-note b { color: var(--accent); }
+
+/* ── 高置信一键送回收站 ─────────────────────────────────── */
+.batchbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.9rem;
+  margin: 0 0 1.5rem;
+  padding: 0.9rem 1.1rem;
+  border-radius: var(--r-lg);
+  border: 1px solid rgba(251, 113, 133, 0.28);
+  background: rgba(251, 113, 133, 0.05);
+}
+
+.batchbar .hint {
+  color: var(--fg-faint);
+  font-size: 0.76rem;
+}
+
+/* 危险动作但走 ghost 形态（不是实心红，避免误点） */
+.ghost.danger-ghost {
+  color: var(--danger);
+  border-color: rgba(251, 113, 133, 0.4);
+}
+
+.ghost.danger-ghost:hover {
+  color: #fff;
+  background: rgba(251, 113, 133, 0.22);
+  border-color: var(--danger);
+}
+
+/* 弹窗里的合计行要显眼 —— 确认前最该看清的就是这行 */
+.modal-row.batch-total {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.modal-row.batch-total .tag {
+  color: var(--danger);
+  font-family: var(--mono);
+  font-size: 0.8rem;
 }

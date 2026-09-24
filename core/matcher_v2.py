@@ -1,4 +1,4 @@
-"""番号识别引擎 v3 —— 移植自 早期原型脚本
+"""番号识别引擎 v3 —— 移植自 X:\\hermes\\library\\code_extract3.py
 （源实现在 26,230 个真实文件名上做过全量实测迭代）。
 
 框架契约（C1/C4 依赖，不得改）::
@@ -16,7 +16,7 @@ v2 -> v3 修掉的三类缺陷
    v3 一律 ``re.finditer`` + ``m.group(0)`` 取整段匹配。
 
 2. 覆盖率
-   字典 13 条规则 -> 通用厂牌兜底 + 无厂牌纯数字番号 + tnum / numpfx / 118 系结构。
+   字典 13 条规则 -> 通用厂牌兜底 + 无厂牌数字番号 + tnum / numpfx / 118 系结构。
 
 3. 噪音
    字幕组 / 站名 / 技术标记 / 欧美点分名 会污染匹配，先剥后匹配
@@ -220,7 +220,7 @@ YEAR_LIKE = re.compile(r'^(19|20)\d{2}$')
 # 关键是**不许从字母数字串中间起匹配**：`C10IDLEA10`、`0gz740xhkob56…` 这类
 # 哈希/缓存名会因此吐出 `IDLEA-10`、`XHKOB-56` 假番号。
 P_NUMPFX = re.compile(r'(?i)(?<![A-Za-z0-9])\d{2,4}([A-Z]{2,5})[-_ ]?(\d{2,5})(?![0-9])')
-# 无厂牌纯数字番号：FC2 系之外的纯数字（2728927 / 1234567）。
+# 无厂牌数字番号：FC2 系之外的纯数字（2728927 / 1234567）。
 # 只认 7 位 —— 6 位实测全是 `894916` 这类无意义编号，8 位多是日期/ID（见下）。
 P_BARE_NUM = re.compile(r'(?<!\d)(\d{6,8})(?!\d)')
 
@@ -305,6 +305,25 @@ def _norm(prefix, num):
     """拼番号。**保留前导零**（与源实现的 lstrip('0') 有意不同，见模块 docstring）。"""
 
     return '{}-{}'.format(prefix.upper(), num)
+
+
+def _glued_letter(text, end):
+    """`text[end]` 是不是**紧贴**数字的大写字母（番号的续写痕迹）。
+
+    判据用「紧跟其后」而不是「前面有空格」：分隔符已被 `strip_noise` 剥掉，
+    `FH 27V` 与 `FH27V` 到这一步都是 `FH27V`。真番号的尾部字母大多另起一段
+    （`ABP-171-C` / `ABP-171-U.torrent`），或被 `strip_noise` 当版本标记
+    剥掉；只有**连在一起的**才是形态可疑的那种。
+
+    ⚠️ 只在调用方已确认「该粘尾字母不能信」时才用（当前是未收录厂牌）。
+    对已收录厂牌不能套 —— `ABP-171UC` 的 UC 是真番号的噪声标记。
+    """
+
+    if end >= len(text):
+
+        return False
+
+    return text[end].isalpha() and text[end].isascii()
 
 
 def _site_padded_num(num):
@@ -474,6 +493,25 @@ class NumberMatcher:
                 continue
             # 未收录厂牌 + 年份形数字 -> 假阳性（TASTE-2010 / BI-2025 / VDAY-2019）
             if YEAR_LIKE.match(m.group(2)) and prefix not in KNOWN_STUDIO:
+                continue
+
+            # 数字后面**直接粘着**字母时，未收录厂牌 + **2 位数字**不认
+            # （2026-09-24）。
+            #
+            # 实测（主人报的 FH-27）：目录名 `…激情啪啪等FH 27V` 里的 `27V`
+            # 被抠成 `FH-27`（尾部 V 被当版本标记丢掉），而本地其实是 25 集
+            # 自拍短片 —— 于是 JavDB 上 FH-27 的磁力与评论被强加在错误资源上。
+            #
+            # ⚠️ 为什么必须卡「2 位数字」这一条 —— 我第一版没卡，把真分片
+            # 一起挡了（实测 `DSVR-219D.VR.mp4` / `KSDO-021A.avi` 当场认不出，
+            # 重扫会让它们掉出库，直接抵消「保卡」）。语料实测分布：
+            #     2 位数字 + 字母 -> **0 条**（从没有真实番号长这样）
+            #     3-5 位数字 + 字母 -> 51 条，全是分片标记
+            #         （ATID-516C / OFJE-312A / MVSD-513C / FSDSS-274ch …）
+            # 所以「2 位 + 粘字母」是**纯噪声形态**，卡在这里既准又零误伤。
+            if prefix not in KNOWN_STUDIO \
+                    and len(m.group(2)) <= 2 \
+                    and _glued_letter(clean, m.end()):
                 continue
 
             add(

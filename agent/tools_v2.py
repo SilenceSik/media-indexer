@@ -1,7 +1,7 @@
 """MCP 工具层（v2 主线）。
 
 入口依据：本环境 mcp == 2.0.0，`mcp.server.fastmcp` 已移除，
-server 类改名为 `mcp.server.MCPServer`（探法见卡 t_d84b81d3 交付说明）。
+server 类改名为 `mcp.server.MCPServer`。
 
 ⚠️ 线程模型（实机踩过，别改回去）：
 mcp 2.0.0 的 MCPServer 对**同步**工具函数走
