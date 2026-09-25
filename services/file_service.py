@@ -11,6 +11,8 @@
 import os
 import subprocess
 
+from core.trash_guard import recyclable_reason
+
 
 class FileService:
 
@@ -174,7 +176,7 @@ class FileService:
         迟早会漂移（一边标记一边真删），那正是「保卡」最怕的。
         """
 
-        detail = {"deleted": [], "missing": [], "failed": []}
+        detail = {"deleted": [], "missing": [], "failed": [], "blocked": {}}
 
         try:
 
@@ -191,6 +193,19 @@ class FileService:
             if not os.path.exists(path):
 
                 detail["missing"].append(path)
+
+                continue
+
+            # ── 卷安全检查：进不了回收站的位置，不动手 ──
+            # 对外承诺是「走回收站，随时可恢复」，那就得先确认这个位置
+            # 真的有回收站。移动盘 / 网络盘 / exFAT 卷上 send2trash
+            # 做不到「回收」这件事 —— 宁可漏删，也不能让「可恢复」
+            # 变成一句空话。同一个卷的原因只报一次，免得刷屏。
+            safe, why = recyclable_reason(path)
+
+            if not safe:
+
+                detail.setdefault("blocked", {}).setdefault(why, []).append(path)
 
                 continue
 
@@ -244,6 +259,7 @@ class FileService:
                 "deleted": [],
                 "missing": [],
                 "failed": [],
+                "blocked": {},
             }
 
         detail = self._trash_and_mark(self.files_of(number))
@@ -251,6 +267,17 @@ class FileService:
         if detail["failed"]:
 
             return False, f"部分失败（{len(detail['failed'])} 个）", detail
+
+        # 卷安全检查拦下的：文件还在，只是没动。要讲清为什么没动 ——
+        # 否则用户看到「已删 0 个」会以为程序坏了。
+        if detail.get("blocked"):
+
+            reasons = "；".join(
+                "%s（%d 个文件）" % (why, len(files))
+                for why, files in detail["blocked"].items()
+            )
+
+            return False, "为保护数据未删除：%s" % reasons, detail
 
         return True, f"已送回收站 {len(detail['deleted'])} 个文件（卡片保留）", detail
 
@@ -515,6 +542,16 @@ class FileService:
 
                 # 只删仍然为空的（扫描到删除之间可能有变动）
                 if os.listdir(path):
+
+                    continue
+
+                # 同一条卷安全检查 —— 空目录也在源文件所在卷上，
+                # 进不了回收站就不动手（理由与 _trash_and_mark 一致）
+                safe, why = recyclable_reason(path)
+
+                if not safe:
+
+                    failed.append(f"{path}: 为保护数据未删除 —— {why}")
 
                     continue
 
