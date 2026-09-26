@@ -56,7 +56,9 @@
             </span>
             {% endif %}
 
-            <span class="ev" title="javdb 评论数（定「极高」档用）">
+            <span class="ev" title="javdb 评论数。评论**不是硬门槛** ——
+            它只在磁力够（> 3 条）时把档位从「高」升到「极高」；
+            评论多意味着热门，但磁力不足时再多也升不了档。">
               评论 {{ v.comments_count if v.comments_count is not none else '—' }}
             </span>
 

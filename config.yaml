@@ -2,29 +2,47 @@
 # 扫描范围
 # ══════════════════════════════════════════════════════════════
 #
-# 分三档：
+# 分三档（2026-09-24 主人定）：
 #
-#   skip    不扫（系统盘建议 skip）
-#   known   只扫 known_paths 里列的已知目录（适合慢盘/病盘：
-#           全盘遍历要读大量目录项，只扫目标目录就够）
+#   skip    不扫
+#   known   只扫 known_paths 里列的**已知 AV 路径**（保护慢盘/病盘）
 #   full    整盘扫
 #
-# ⚠️ 只有列在 scan_scope 里的盘才参与扫描 —— 没列的盘**不会被扫**。
-#    这是安全默认：不写进去的盘不会被碰。
+# 为什么需要 known 这一档：E: 与 F: 是**同一块物理盘**
+# （TOSHIBA HDWD130，WMI 报 Warning / Predictive Failure）。
+# 全盘遍历要读大量目录项，对这块盘是额外负担。而 AV 只集中在几个已知
+# 目录里（从 26,230 条快照统计得出），扫这几个就够。
 #
-# 按自己的机器改：
+# ⚠️ 只有列在 scan_scope 里的盘才参与扫描 —— 没列的盘**不会被扫**
+#    （安全默认：C 盘系统盘不在列表里，就不会被碰）。
 scan_scope:
-  C: "skip"        # 系统盘，不扫
-  D: "full"
-  # E: "known"     # 慢盘/病盘示例：只扫 known_paths
-  # F: "known"
+  C: "skip"       # 系统盘，不扫
+  D: "full"       # 开发盘（语料少，但扫了才知道）
+  E: "known"      # 病盘，只扫已知 AV 路径
+  F: "known"      # 病盘，同上
+  G: "full"
+  H: "full"
+  M: "full"       # NVMe 备份盘
 
-# `known` 档的盘只扫这些目录（大小写不敏感）。按自己实际存放位置填。
-known_paths: []
-#  - "X:\\media"
-#  - "X:\\downloads"
+# `known` 档的盘扫这些目录（大小写不敏感）。
+#
+# 依据：26,230 条快照按顶层目录统计命中数 ——
+#   X:\downloads   163 命中 / 4001 文件
+#   X:\downloads   138 命中 / 1547 文件
+#   X:\media         113 命中 /  761 文件
+#   X:\下载        38 命中 /  855 文件
+#   X:\Down         3 命中 /  111 文件
+#   X:\迅雷云盘     1 命中 /   62 文件
+known_paths:
+  - "X:\\downloads"
+  - "X:\\dl-other"
+  - "X:\\cloud"
+  - "X:\\downloads"
+  - "X:\\media"
+  - "X:\\dl-other"
 
 # 兼容保留：不传路径、也没有 scan_scope 时用这个。
+# 现在走 scan_scope，这项只在旧配置里还有意义。
 scan_paths:
   - "X:\\"
 

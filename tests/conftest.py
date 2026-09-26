@@ -62,6 +62,42 @@ MB = 1024 * 1024
 # conftest 比所有测试模块先导入，此刻的 LMM_* 就是未被污染的原值
 _PRISTINE_LMM = {k: v for k, v in os.environ.items() if k.startswith("LMM_")}
 
+# ── 会话级库路径隔离 ────────────────────────────────────────────
+#
+# 为什么必须在**收集期**就把路径钉死，而不是等夹具：
+#
+#   `web/app.py` 在**导入期**就跑 `ensure_schema()`。档位迁移
+#   （`core.database_v2._retier_from_new_thresholds`）是会**写数据**的，
+#   所以测试模块一旦 `from web import app`，那一刻若 LMM_DB 还没设，
+#   解析到的就是**生产库** `storage/library_v2.db` —— 跑一次测试就把
+#   用户真实库的 tier 按新门槛重算一遍。
+#
+#   实测（修复前）：复位 `user_version=0`、手改一条 tier，跑全量后
+#   真实库变成 `user_version=2`、那条 tier 被改掉。夹具来不及拦，
+#   因为导入发生在夹具之前。
+#
+# 隔离只作用于**测试进程内**：子进程走 `_clean_env()`（剥掉 LMM_*），
+# 仍从 config.yaml 解析真实路径 —— 所以浏览器用例起的服务测的还是真库。
+_SESSION_TMP = tempfile.mkdtemp(prefix="lmm-tests-")
+
+_ISOLATED_LMM = dict(_PRISTINE_LMM)
+
+# 直接覆盖而不用 setdefault：目标就是「测试绝不碰生产库」，
+# 哪怕外部环境故意把 LMM_DB 指向真库，这里也要掰回来。
+for _key, _leaf in (
+    ("LMM_DB", "library.db"),
+    ("LMM_INDEX_DB", "file_index.db"),
+    ("LMM_COVERS", "covers"),
+    ("LMM_SCREENSHOTS", "screenshots"),
+    ("LMM_PREVIEWS", "previews"),
+    ("LMM_TORRENTS", "torrents"),
+    ("LMM_EXPORTS", "exports"),
+):
+
+    _ISOLATED_LMM[_key] = os.path.join(_SESSION_TMP, _leaf)
+
+os.environ.update(_ISOLATED_LMM)
+
 
 def _clean_env():
     """剥掉测试污染进来的 LMM_*，让子进程从 config.yaml 解析真实路径。"""
@@ -71,9 +107,11 @@ def _clean_env():
 
 @pytest.fixture(autouse=True)
 def _restore_lmm_env():
-    """每个用例结束后把 LMM_* 恢复成会话开始时的样子。
+    """每个用例结束后把 LMM_* 恢复到**隔离基线**。
 
-    快照取自 conftest 的导入时刻，所以连「收集期就写环境变量」那种也兜得住。
+    基线是 `_ISOLATED_LMM`（指向会话临时目录），不是原始快照 ——
+    恢复成原始快照会让 LMM_DB 回到未设置状态，下一个用例导入
+    `web.app` 时又会解析到生产库。
     """
 
     yield
@@ -81,7 +119,7 @@ def _restore_lmm_env():
     for key in [k for k in os.environ if k.startswith("LMM_")]:
         del os.environ[key]
 
-    os.environ.update(_PRISTINE_LMM)
+    os.environ.update(_ISOLATED_LMM)
 
 
 @pytest.fixture(scope="session")
@@ -123,11 +161,21 @@ def _real_db_path():
 
     刻意不走进程内 `from web.app import DB_PATH`：那些模块会把
     `sys.modules["web.app"]` 换成指向临时库的副本，进程内取到的不可信。
+
+    ⚠️ 也**刻意不导入 `web.app`**：模块级有 `ensure_schema()`，
+    而档位迁移会写数据 —— 这里只是想知道路径，不该顺带把真库改了。
+    改为把 `web.app` 的两个纯函数抠出来单独执行（同样的 `resolve_path`
+    语义，但不触发模块体）。
     """
 
+    # 与 web.app 同源的解析逻辑：BASE_DIR 即仓库根（子进程 cwd=ROOT），
+    # 相对路径按它解析 —— 与 `web.app.resolve_path` 逐字一致。
     code = (
-        "import sys; sys.path.insert(0, '.');"
-        " from web.app import DB_PATH; print(DB_PATH)"
+        "import os, sys, yaml;"
+        "BASE = os.getcwd();"
+        "conf = yaml.safe_load(open(os.path.join(BASE, 'config.yaml'), encoding='utf-8'));"
+        "p = os.environ.get('LMM_DB') or conf['database'];"
+        "print(p if os.path.isabs(p) else os.path.join(BASE, p))"
     )
 
     proc = subprocess.run(
@@ -154,10 +202,58 @@ def _real_db_path():
 
 
 @pytest.fixture(scope="session")
-def live_server():
-    """独立子进程起 uvicorn，返回 (base_url, 真实库路径)。"""
+def live_server(tmp_path_factory):
+    """独立子进程起 uvicorn，返回 (base_url, **副本**库路径)。
 
-    db_path = _real_db_path()
+    ⚠️ 子进程拿到的是**真库的副本**，不是真库本身。
+
+    先前用 `_clean_env()` 让子进程从 config.yaml 解析**真库** —— 当时
+    `ensure_schema()` 只补列、幂等无害，所以没事。但档位迁移
+    （`_retier_from_new_thresholds`）会**写数据**，于是每跑一次浏览器用例
+    就重算一次用户真库的 `tier`。实测：复位 `user_version=0` 后跑全量，
+    真库被改回 `user_version=2`。
+
+    改成副本后两边都保住：浏览器用例仍断言**真实语料**（副本内容一致），
+    而写入只落在副本上。副本必须是文件拷贝，不能用 `file:...?mode=ro`
+    这类只读挂载 —— uvicorn 起的服务要能写（迁移、扫描测试都要）。
+
+    ⚠️ **没有真库时要退回空库**（公开克隆就是这种情况，`storage/` 是
+    gitignored）：真库不存在就建一个空的，让服务能起来、页面能渲染。
+    用例自己会按内容跳过（`test_detail_browser` 挑不到样本就 skip），
+    但**夹具层不能崩** —— 崩了连 skip 都到不了，整个模块报 ERROR。
+    """
+
+    import shutil
+
+    real_db = _real_db_path()
+
+    env = _clean_env()
+
+    db_copy = os.path.join(_SESSION_TMP, "livecopy-library.db")
+
+    if os.path.exists(real_db):
+
+        shutil.copyfile(real_db, db_copy)
+
+    else:
+
+        # 空库：服务起得来即可，用例按内容自行跳过。
+        # 函数内导入（不在模块级）：避免 conftest 导入期拉起 core 依赖。
+        from core.database_v2 import Database
+
+        Database(db_copy).conn.close()
+
+    env["LMM_DB"] = db_copy
+
+    index_real = os.path.join(ROOT, "storage", "file_index_v2.db")
+
+    if os.path.exists(index_real):
+
+        index_copy = os.path.join(_SESSION_TMP, "livecopy-index.db")
+
+        shutil.copyfile(index_real, index_copy)
+
+        env["LMM_INDEX_DB"] = index_copy
 
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
@@ -171,7 +267,7 @@ def live_server():
         [PYTHON, "-m", "uvicorn", "web.app:app",
          "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"],
         cwd=ROOT,
-        env=_clean_env(),
+        env=env,
         stdout=log,
         stderr=subprocess.STDOUT,
     )
@@ -187,7 +283,9 @@ def live_server():
                 "uvicorn 子进程 45 秒内没起来：\n" + log.read()[-2000:]
             )
 
-        yield base, db_path
+        # 仍返回 (base_url, 真库路径)：用例按真库定位样本（**只读**），
+        # 而服务写的是副本 —— 所以不该改返回值元数，否则一堆解包要跟着改。
+        yield base, real_db
 
     finally:
         proc.terminate()

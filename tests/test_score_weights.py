@@ -92,20 +92,32 @@ def test_breakdown_names_are_parts_not_items(web):
 
 
 def test_breakdown_explains_the_math(web):
-    """明细要能自圆其说：服务器侧 × 时长 = 最终分。"""
+    """明细要能自圆其说：（服务器侧 + 门控加成）× 时长 = 最终分。"""
 
     client, _, _ = web
 
     h = client.get("/detail/FULL-001").text
 
-    m = re.search(r"最终分 = 服务器侧 × 时长一致性 =\s*(\d+)\s*×\s*([\d.]+)\s*=\s*<b>(\d+)</b>", h)
+    m = re.search(
+        r"最终分 = （服务器侧 \+ 门控加成）× 时长一致性 =\s*"
+        r"(\d+) \+ (\d+)\s*"
+        r"= (\d+) ×\s*([\d.]+)\s*"
+        r"= <b>(\d+)</b>",
+        h,
+    )
 
     assert m, "没渲染出算式"
 
-    base, factor, score = int(m.group(1)), float(m.group(2)), int(m.group(3))
+    base, bonus, gated, factor, score = (
+        int(m.group(1)), int(m.group(2)), int(m.group(3)),
+        float(m.group(4)), int(m.group(5)),
+    )
 
-    assert abs(base * factor - score) <= 1, \
-        "算式对不上：{} × {} = {}".format(base, factor, score)
+    assert base + bonus == gated, \
+        "加成没算进「服务器侧合计」：{} + {} != {}".format(base, bonus, gated)
+
+    assert abs(gated * factor - score) <= 1, \
+        "算式对不上：{} × {} = {}".format(gated, factor, score)
 
 
 def test_breakdown_notes_where_points_are_lost(web):

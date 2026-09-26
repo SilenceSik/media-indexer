@@ -8,6 +8,18 @@ from core.database_guard import DatabaseGuard
 from core.magnet_judge import is_trusted_recognition
 
 
+# 档位规则版本号（存在 SQLite 的 `PRAGMA user_version` 里）。
+#
+# ⚠️ **改了 `core.magnet_judge` 的档位门槛，就必须把这个数 +1。**
+#    否则存量库里的 `titles.tier` 会停留在旧口径 —— 界面显示错的档位，
+#    删除门控也会按错的档放行/拦截。
+#
+# 版本历史：
+#   1  2026-09-23  D9 落地：低/高 >= 3 条、极高 = >= 3 条且评论 >= 50
+#   2  2026-09-26  主人改口径：高 = 磁力 > 5、极高 = 磁力 > 3 且 评论 > 10
+TIER_RULE_VERSION = 2
+
+
 class Database:
 
     def __init__(
@@ -264,6 +276,8 @@ class Database:
             ("name", "TEXT"),
         ])
 
+        self._retier_from_new_thresholds()
+
         # media_files：识别来源（D11 第三条要用）
         #
         # `match_source` 记 matcher 是用哪种形态认出这个番号的
@@ -342,6 +356,54 @@ class Database:
         )
 
         self.conn.commit()
+
+    def _retier_from_new_thresholds(self):
+        """按**当前**门槛重算存量档位（幂等）。
+
+        为什么必须有：`titles.tier` 是**落库**的（前端展示与删除门控都读它），
+        而档位是 `tier_of(correct_magnets, comments_count)` 的纯函数结果。
+        门槛一改，库里存的还是**旧口径**算出来的档 —— 不重算的话，
+        界面会显示错的档位、门控会按错的档放行或拦截。
+
+        重算不需要重抓 javdb：两个输入都已经在库里
+        （`correct_magnets` / `comments_count`）。
+
+        用 `PRAGMA user_version` 当迁移标记，只在版本落后时跑一次。
+        改动 `core.magnet_judge` 的门槛时**必须**把 `TIER_RULE_VERSION` +1。
+        """
+
+        current = self.conn.execute("PRAGMA user_version").fetchone()[0]
+
+        if current >= TIER_RULE_VERSION:
+            return
+
+        from core.magnet_judge import tier_of
+
+        rows = self.conn.execute(
+            "SELECT id, correct_magnets, comments_count, tier FROM titles"
+        ).fetchall()
+
+        changed = 0
+
+        for r in rows:
+
+            want = tier_of(r["correct_magnets"], r["comments_count"])
+
+            if r["tier"] != want:
+
+                self.conn.execute(
+                    "UPDATE titles SET tier = ? WHERE id = ?", (want, r["id"])
+                )
+
+                changed += 1
+
+        self.conn.execute(
+            "PRAGMA user_version = {}".format(TIER_RULE_VERSION)
+        )
+
+        self.conn.commit()
+
+        return changed
 
     def create_metadata(self):
 

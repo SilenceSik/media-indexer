@@ -103,7 +103,8 @@
         <summary>
           置信分 {{ video.breakdown.score }} 怎么来的？
           <span class="bd-eq">
-            = 服务器侧 {{ video.breakdown.base }}
+            = （服务器侧 {{ video.breakdown.base }}
+            + 门控加成 {{ video.breakdown.gate.bonus }}）
             × 时长一致性 {{ '%.0f'|format(video.breakdown.consistency * 100) }}%
           </span>
         </summary>
@@ -132,6 +133,25 @@
             <span class="bd-n">上面四项之和（满分 100）</span>
           </div>
 
+          {# ── 门控加成（2026-09-26）：唯一取决于档位的一项 ──
+             进「高」/「极高」才给分，让热门资源抬起来、
+             冷门资源天然落在其下 —— 分数的相对高低与
+             「能不能一键删」用同一套口径。 #}
+          <div class="bd-row bd-gate">
+            <span class="bd-k">门控加成</span>
+            <span class="bd-w">按档位</span>
+            <span class="bd-v">
+              {{ '档位 ' ~ video.breakdown.gate.tier if video.breakdown.gate.tier else '—' }}
+            </span>
+            <span class="bd-p">
+              {% if video.breakdown.gate.bonus %}+{{ video.breakdown.gate.bonus }}{% else %}0{% endif %}
+            </span>
+            <span class="bd-n">
+              {{ video.breakdown.gate.note }}<br>
+              <span class="bd-rule">{{ video.breakdown.gate.rule }}</span>
+            </span>
+          </div>
+
           <div class="bd-row bd-dur">
             <span class="bd-k">时长一致性</span>
             <span class="bd-w">乘性</span>
@@ -145,8 +165,9 @@
           </div>
 
           <p class="bd-note">
-            最终分 = 服务器侧 × 时长一致性 =
-            {{ video.breakdown.base }} ×
+            最终分 = （服务器侧 + 门控加成）× 时长一致性 =
+            {{ video.breakdown.base }} + {{ video.breakdown.gate.bonus }}
+            = {{ video.breakdown.gate.gated }} ×
             {{ '%.2f'|format(video.breakdown.duration.value) }}
             = <b>{{ video.breakdown.score }}</b>。
             时长是**乘性因子**：磁力/评论/核对/来源只证明「服务器上有这个号」，

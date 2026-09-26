@@ -15,11 +15,14 @@ from core.magnet_judge import (                              # noqa: E402
     COMMENTS_FOR_TOP,
     MAGNETS_FOR_HIGH,
     MAGNETS_FOR_STRONG,
+    MAGNETS_FOR_TOP,
     candidates,
     deletable,
     is_batch_deletable,
     is_correct_magnet,
     is_evidence_strong,
+    is_extreme,
+    is_high,
     is_trusted_recognition,
     judge,
     manual_only,
@@ -289,28 +292,36 @@ def test_judge_handles_missing_name():
 # ─────────────────────── D9 分档
 
 def test_tier_boundaries():
-    """四档边界：0 / 1-2 / >=3 / >=3+评论。"""
+    """四档边界（主人 2026-09-26 口径）：0 / 1-5 / >5 / >3+评论>10。"""
 
     assert tier_of(0) == "极低"
     assert tier_of(1) == "低"
     assert tier_of(2) == "低"
-    assert tier_of(3) == "高"
+    assert tier_of(5) == "低"          # 5 条**不**算 >5
+    assert tier_of(6) == "高"          # 第一条进「高」的
     assert tier_of(9) == "高"
     assert tier_of(100) == "高"
 
 
-def test_tier_top_requires_comments():
-    """「极高」= 磁力够 **且** 评论够。"""
+def test_tier_top_requires_both_conditions():
+    """「极高」= 磁力 > 3 **且** 评论 > 10。两个条件都要。"""
 
-    assert tier_of(3, comments=COMMENTS_FOR_TOP) == "极高"
-    assert tier_of(3, comments=COMMENTS_FOR_TOP - 1) == "高"
-    assert tier_of(50, comments=0) == "高"
-    assert tier_of(50, comments=None) == "高"
+    # 都满足
+    assert tier_of(4, comments=11) == "极高"
+    assert tier_of(20, comments=50) == "极高"
+
+    # 评论差一条 -> 不能进极高；但磁力 4 条不到「高」的 >5 -> 落到低
+    assert tier_of(4, comments=10) == "低"
+    # 磁力够「高」但评论不足 -> 高（评论不是硬门槛）
+    assert tier_of(6, comments=0) == "高"
+    assert tier_of(6, comments=10) == "高"
+    assert tier_of(6, comments=11) == "极高"
 
 
 def test_tier_comments_do_not_lift_thin_magnets():
-    """评论再多也不能把磁力不足的片升档 —— 两个条件都要。"""
+    """评论再多也不能把磁力不足的片升档 —— 磁力 >3 是前提。"""
 
+    assert tier_of(3, comments=9999) == "低"     # 3 不 >3
     assert tier_of(1, comments=9999) == "低"
     assert tier_of(0, comments=9999) == "极低"
 
@@ -326,25 +337,55 @@ def test_tier_survives_non_numeric_comments():
     抛 ValueError 把整个定档流程打断。
     """
 
-    assert tier_of(5, comments="") == "高"          # 空串 -> 当没数据
-    assert tier_of(5, comments="   ") == "高"
-    assert tier_of(5, comments="abc") == "高"       # 非数字 -> 当没数据
-    assert tier_of(5, comments="1,234") == "极高"   # 带千分位要能认
-    assert tier_of(5, comments=49.9) == "高"
-    assert tier_of(5, comments="0") == "高"
-    assert tier_of(5, comments=0) == "高"
+    assert tier_of(6, comments="") == "高"          # 空串 -> 当没数据
+    assert tier_of(6, comments="   ") == "高"
+    assert tier_of(6, comments="abc") == "高"       # 非数字 -> 当没数据
+    assert tier_of(6, comments="1,234") == "极高"   # 带千分位要能认
+    assert tier_of(6, comments=10.9) == "高"        # 10.9 不 >10... 见下
+    assert tier_of(6, comments=49.9) == "极高"
+    assert tier_of(6, comments="0") == "高"
+    assert tier_of(6, comments=0) == "高"
 
 
-def test_high_threshold_is_three():
+def test_high_threshold_is_five():
     """锁住门槛值 —— 改了要同时更新这里的分布断言。"""
 
-    assert MAGNETS_FOR_HIGH == 3
+    assert MAGNETS_FOR_HIGH == 5
+
+
+def test_top_thresholds():
+    """「极高」两条件：磁力 > 3 且 评论 > 10。"""
+
+    assert MAGNETS_FOR_TOP == 3
+    assert COMMENTS_FOR_TOP == 10
+
+
+def test_gate_predicates_shared_by_scoring():
+    """`is_extreme` / `is_high` 是档位的单一真源。
+
+    置信分（`core.confidence`）也走这两个函数 —— 所以它们必须与
+    `tier_of` 永远一致，否则「分数高」和「能一键删」会打架。
+    """
+
+    for c, n in ((0, 0), (3, 100), (4, 10), (4, 11), (5, 50), (6, 0),
+                 (100, 0), (100, 100)):
+        assert is_extreme(c, n) is (tier_of(c, n) == "极高"), (c, n)
+
+        # ⚠️ `is_high` 只回答「磁力 > 5」，**不足以**刻画「高或极高」：
+        # 4 条磁力 + 11 评论是极高，但 is_high(4) 是 False。
+        # 所以正确的关系只有下面两条，别写成 `is_high ⟺ 高中极高`。
+        assert (is_high(c) and not is_extreme(c, n)) is \
+            (tier_of(c, n) == "高"), (c, n)
+
+        # 进批量删 ⟺ 两档之一（这才是门控真正用的判据）
+        assert (is_extreme(c, n) or is_high(c)) is \
+            (tier_of(c, n) in ("高", "极高")), (c, n)
 
 
 def test_strong_threshold_is_display_only():
     """`strong` 只是展示档，**不能**混进删除门控。
 
-    如果有人把它接到 `is_batch_deletable` 上，门槛会从 97.6% 收紧到 76.2%，
+    如果有人把它接到 `is_batch_deletable` 上，门槛会大幅收紧，
     相当于偷偷改了 D10 的删除规则 —— 这条测试守住这个边界。
     """
 
@@ -574,15 +615,32 @@ def test_real_corpus_distribution_documented():
     total = len(counts)
 
     thin = sum(1 for n in counts if n <= 2)
-    strong = sum(1 for n in counts if n >= MAGNETS_FOR_HIGH)
+    # ⚠️ 这里用**字面 3** 而不是 MAGNETS_FOR_HIGH：这条断言记录的是
+    # 「>=3 覆盖 97.6%」这个**历史事实**，用来解释为什么 2026-09-26
+    # 要把门槛从 >=3 抬到 >5。跟着常量走会让它失去这个作用。
+    old_gate = sum(1 for n in counts if n >= 3)
 
     # 薄的（极低+低）是少数 —— 这条稳
     assert thin / total < 0.10, (
         f"薄档占比 {thin / total:.1%}，与实测 2.4% 差太多，判定器可能变松了"
     )
 
-    # >=3 覆盖绝大多数 —— 这条记录「高」档没区分力这个事实
-    assert strong / total > 0.90, (
-        f">=3 条只占 {strong / total:.1%}（实测 97.6%）—— "
+    # >=3 覆盖绝大多数 —— 这条记录「旧门槛没区分力」这个事实
+    assert old_gate / total > 0.90, (
+        f">=3 条只占 {old_gate / total:.1%}（实测 97.6%）—— "
         f"要么语料变了，要么判定器变严了，两者都要重新定门槛"
+    )
+
+    # 新口径的实际效果：**不是**靠磁力收窄（本库磁力普遍很多，
+    # 10-19 条占 58.7%，所以 >5 仍覆盖 90%+）。真正被挡下的是
+    # 「磁力 3~5 且评论 <=10」这一带 —— 数量少，但正是最可疑的那批
+    # （磁力刚够旧门槛 3 条、又没人讨论）。
+    #
+    # 这条断言记录**实测**结果，不假装新门槛收窄了很多：
+    # 若哪天覆盖跌破 85%，说明语料或判定器变了，要重新定门槛。
+    new_gate = sum(1 for n in counts if n > MAGNETS_FOR_HIGH)
+
+    assert 0.85 < new_gate / total <= 1.0, (
+        f"新门槛(>5) 覆盖 {new_gate / total:.1%}，与实测 93.7% 差太多 —— "
+        f"要么语料变了，要么判定器变了"
     )

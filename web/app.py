@@ -641,6 +641,28 @@ def score_breakdown(correct, comments, matches, source, ratios,
     out = C.score(correct=correct, comments=comments, matches=matches,
                   source=source, ratios=ratios, mismatch=mismatch)
 
+    # ── 门控加成（2026-09-26）──
+    #
+    # 单独成行展示，因为它是**唯一一项取决于档位**的加分：
+    # 进「高」/「极高」才给，用来把热门资源的分抬起来、
+    # 同时让冷门资源的分数天然落在它们之下（见 core/confidence 文件头）。
+    gate = {
+        "tier": out.get("gate_tier"),
+        "bonus": out.get("gate_bonus", 0),
+        "gated": out.get("base_gated", out["base"]),
+        "note": (
+            "档位「{}」—— 进批量删门槛，加 {} 分".format(
+                out.get("gate_tier"), out.get("gate_bonus", 0))
+            if out.get("gate_bonus") else
+            "档位「{}」—— 不进批量删门槛，不加分（这就是热门与冷门的分数差）".format(
+                out.get("gate_tier"))
+        ),
+        "rule": (
+            "极高 = 磁力 > {} 且 评论 > {}；高 = 磁力 > {}".format(
+                C.MAGNETS_FOR_TOP, C.COMMENTS_FOR_TOP, C.MAGNETS_FOR_HIGH)
+        ),
+    }
+
     return {
         "score": out["score"],
         "base": base,
@@ -651,6 +673,7 @@ def score_breakdown(correct, comments, matches, source, ratios,
         # dict 的 `.items()` 方法，模板 for 循环直接 TypeError。
         "parts": items,
         "duration": duration,
+        "gate": gate,
         "weights": {
             "magnets": C.W_MAGNETS,
             "match": C.W_MATCH,
@@ -1197,6 +1220,10 @@ def rows_to_videos(rows, deletable=None, eligibility=None, durations=None,
                 # ── 置信分（取代 evidence_strong 展示位）──
                 "confidence": conf["score"],
                 "confidence_base": conf["base"],
+                # 门控加成（2026-09-26）：进档才有的加分，见 core/confidence
+                "confidence_gated": conf.get("base_gated", conf["base"]),
+                "confidence_gate_tier": conf.get("gate_tier"),
+                "confidence_gate_bonus": conf.get("gate_bonus", 0),
                 "confidence_duration": conf["consistency"],
                 "duration_known": conf["duration_known"],
                 # 时长完全不符：卡片上要显眼标出来 —— 这是「本地这批文件

@@ -115,6 +115,36 @@ def test_mixed_magnets_tier_uses_correct_count(tmp_path):
 
 
 def test_all_correct_magnets_reach_high(tmp_path):
+    """全部磁力都属于该番号、且条数 > 5 -> 「高」（可批量删）。
+
+    ⚠️ 2026-09-26 门槛改为「磁力 > 5」—— 这里必须给足 6 条，
+    3 条只到「低」（旧口径下 3 条即「高」）。
+    """
+
+    svc, db = build(tmp_path, payload_for(
+        "ABP-171",
+        [
+            "ABP-171.mp4", "[FHD]abp-171.mp4", "ABP-171-UC.torrent.非同厂版本",
+            "ABP-171-c.mp4", "ABP-171-4k.mp4", "ABP-171-uncensored.mp4",
+        ],
+    ))
+
+    svc.enrich("ABP-171")
+
+    r = db.conn.execute(
+        "SELECT correct_magnets, tier FROM titles WHERE number = 'ABP-171'"
+    ).fetchone()
+
+    assert r[0] == 6
+    assert r[1] == "高"
+
+
+def test_three_correct_magnets_is_low_now(tmp_path):
+    """3 条正确磁力在**新口径**下只到「低」—— 这是本次调档的直接效果。
+
+    旧口径「>= 3 即高」被实测证明没区分力（覆盖 97.6%）。
+    """
+
     svc, db = build(tmp_path, payload_for(
         "ABP-171",
         ["ABP-171.mp4", "[FHD]abp-171.mp4", "ABP-171-UC.torrent.非同厂版本"],
@@ -127,7 +157,7 @@ def test_all_correct_magnets_reach_high(tmp_path):
     ).fetchone()
 
     assert r[0] == 3
-    assert r[1] == "高"
+    assert r[1] == "低"
 
 
 def test_zero_correct_magnets_is_very_low(tmp_path):
@@ -201,7 +231,10 @@ def test_mismatch_blocks_batch_even_when_tier_high(tmp_path):
 
     svc, db = build(tmp_path, payload_for(
         "ABP-171",
-        ["ABP-171.mp4", "ABP-171-c.mp4", "ABP-171-UC.torrent"],
+        [
+            "ABP-171.mp4", "ABP-171-c.mp4", "ABP-171-UC.torrent",
+            "ABP-171-4k.mp4", "ABP-171-hd.mp4", "ABP-171-final.mp4",
+        ],
         returned_number="ABP-999",                           # 不一致
     ))
 
@@ -224,9 +257,18 @@ def test_mismatch_blocks_batch_even_when_tier_high(tmp_path):
 # ─────────────────────── 评论与极高档
 
 def test_comments_drive_very_high(tmp_path):
+    """磁力 > 3 **且** 评论 > 10 -> 「极高」。
+
+    ⚠️ 2026-09-26 口径：极高要**两个条件同时满足**，
+    所以这里磁力给 4 条（>3）、评论 80（>10）。
+    """
+
     svc, db = build(tmp_path, payload_for(
         "ABP-171",
-        ["ABP-171.mp4", "ABP-171-c.mp4", "ABP-171-UC.torrent"],
+        [
+            "ABP-171.mp4", "ABP-171-c.mp4", "ABP-171-UC.torrent",
+            "ABP-171-4k.mp4",
+        ],
         comments=80,
     ))
 
@@ -238,6 +280,28 @@ def test_comments_drive_very_high(tmp_path):
 
     assert r[0] == "极高"
     assert r[1] == 80
+
+
+def test_comments_alone_cannot_reach_very_high(tmp_path):
+    """评论再多也升不了档 —— 磁力 > 3 是前提（主人：「评论不是硬性标准」）。
+
+    3 条磁力 + 999 评论 = 「低」：评论是**升档条件**，不是替代条件。
+    """
+
+    svc, db = build(tmp_path, payload_for(
+        "ABP-171",
+        ["ABP-171.mp4", "ABP-171-c.mp4", "ABP-171-UC.torrent"],
+        comments=999,
+    ))
+
+    svc.enrich("ABP-171")
+
+    r = db.conn.execute(
+        "SELECT correct_magnets, tier FROM titles WHERE number = 'ABP-171'"
+    ).fetchone()
+
+    assert r[0] == 3
+    assert r[1] == "低", "3 条磁力不满足 >3，评论再多也不能升档"
 
 
 def test_missing_comments_does_not_crash(tmp_path):

@@ -212,6 +212,19 @@ def main(argv=None):
 
         return 0
 
+    # ⚠️ 建库 = 跑迁移（会写数据），所以先确认真有可扫的目录。
+    #
+    # 目录全不存在时别建库：`--dry-run <不存在的路径>` 这种调用
+    # 本来不该碰库，修复前它会顺手迁移一次 —— 测试里的
+    # `test_missing_dir_is_reported_not_crashed` 正是这种调用，
+    # 实测会把**生产库**的 tier 按新门槛重算一遍。
+    if not any(os.path.isdir(path) for path in targets):
+
+        print("\n没有可扫描的目录。")
+
+        # dry-run 只是「看一眼」，没什么可报错的，保持 0
+        return 0 if args.dry_run else 1
+
     db = Database(database)
 
     service = ScanService(

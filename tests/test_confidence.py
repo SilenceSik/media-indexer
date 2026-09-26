@@ -258,12 +258,91 @@ def test_near_perfect_title_is_near_100():
 
 
 def test_score_unknown_duration_not_penalized():
-    """没跑过时长核对：不扣分，但必须标明未验。"""
+    """没跑过时长核对：不扣分，但必须标明未验。
+
+    ⚠️ 2026-09-26 起拿它比的是 `base_gated`（含门控加成），不是 `base` ——
+    未验时长时不乘因子，所以最终分就是加了成的那份。
+    """
 
     res = confidence.score(15, 1, True, "dictionary", ratios=None)
 
     assert res["duration_known"] is False
-    assert res["score"] == res["base"]
+    assert res["score"] == res["base_gated"]
+    assert res["base_gated"] >= res["base"]
+
+
+# ── 门控加成（主人 2026-09-26）─────────────────────────────────
+
+def test_gate_bonus_only_for_qualifying_tiers():
+    """进「高」/「极高」才有加成；低/极低一分不给。"""
+
+    extreme = confidence.score(4, 11, True, "std", ratios=None)
+    high = confidence.score(6, 0, True, "std", ratios=None)
+    low = confidence.score(5, 0, True, "std", ratios=None)
+    very_low = confidence.score(0, 0, True, "std", ratios=None)
+
+    assert extreme["gate_tier"] == "极高"
+    assert extreme["gate_bonus"] == confidence.GATE_BONUS_EXTREME
+
+    assert high["gate_tier"] == "高"
+    assert high["gate_bonus"] == confidence.GATE_BONUS_HIGH
+
+    assert low["gate_tier"] == "低"
+    assert low["gate_bonus"] == 0
+    assert low["base_gated"] == low["base"]
+
+    assert very_low["gate_bonus"] == 0
+    assert very_low["base_gated"] == very_low["base"]
+
+
+def test_gate_bonus_uses_the_same_rule_as_deletion_gate():
+    """加成口径必须与删除门控**同一真源**（`tier_of`）。
+
+    否则会出现「分很高但不能一键删」或反过来 —— 界面自相矛盾。
+    """
+
+    from core.magnet_judge import tier_of
+
+    for m, n in ((0, 0), (3, 100), (4, 10), (4, 11), (5, 9), (6, 0),
+                 (10, 0), (20, 60)):
+        res = confidence.score(m, n, True, "std", ratios=None)
+
+        assert res["gate_tier"] == tier_of(m, n), (m, n)
+        assert (res["gate_bonus"] > 0) is (tier_of(m, n) in ("高", "极高")), (m, n)
+
+
+def test_cold_titles_never_outscore_hot_ones():
+    """冷门（进不了批量删）的分**必须**落在热门之下。
+
+    这是主人 2026-09-26 要求的核心：分数高低要与「能不能一键删」一致，
+    不能出现「低档的反而分更高」。
+    """
+
+    hot, cold = [], []
+
+    for m in range(0, 60):
+        for n in (0, 5, 11, 30, 60):
+            res = confidence.score(m, n, True, "std", ratios=None)
+            (hot if res["gate_bonus"] else cold).append(res["base_gated"])
+
+    assert hot and cold
+
+    assert max(cold) < min(hot), (
+        "冷门最高 {} 不低于热门最低 {} —— 分档与门控脱节了".format(
+            max(cold), min(hot))
+    )
+
+
+def test_gate_bonus_not_applied_on_duration_mismatch():
+    """判成「不是同一部片」的档案不加成 —— 它谈不上热门。"""
+
+    res = confidence.score(
+        20, 60, True, "std", ratios=[(5.0, True)] * 5, mismatch=True
+    )
+
+    assert res["score"] == 0
+    assert res["gate_bonus"] > 0, "档位本身仍是极高，但加成不该体现在最终分上"
+    assert res["score"] == 0
 
 
 def test_score_floor_prevents_wipeout():

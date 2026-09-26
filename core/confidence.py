@@ -21,9 +21,16 @@ FH-27 就是这么拿到「强证据」的：15 条磁力、番号核对通过�
 只有时长是直接检验「本地这份文件 = 这部片」的证据。性质不同，
 放在同一个加权和里会被前者的高分稀释掉。
 
-⚠️ 分数**只用于展示与排序，不参与任何删除门控**。
-   删除仍由 `tier`（D9）+ D11 三条件把关 ——
-   见 `core/database_v2.deletion_eligibility()`。
+⚠️ 分数**不门控**（决定能不能删的仍是 `tier` + D11 三条件，
+   见 `core/database_v2.deletion_eligibility()`），但**受门控口径驱动**：
+
+   2026-09-26 起，进档的番号（`tier_of` 判「高」/「极高」）会拿到
+   `GATE_BONUS_*` 加成。所以分数的**高低与门控资格一致** ——
+   进不了批量删的（低/极低）分数一定落在进得去的那批之下。
+   这样界面上「分高」和「能一键删」不会互相打架。
+
+   加成只在**门控口径**上给，不在加权和上给：加权和是算术和，
+   一个维度高就能拿分，表达不了「磁力 **且** 评论」的合取。
 
    ⚠️ 但**别把这句话套到时长判定上**（2026-09-24 主人校准）：
    分数与「剔除」是两件事。分数不门控，而`duration_check.mismatch_verdict`
@@ -35,7 +42,34 @@ FH-27 就是这么拿到「强证据」的：15 条磁力、番号核对通过�
 import math
 
 from core import duration_check
-from core.magnet_judge import TRUSTED_MATCH_SOURCES
+from core.magnet_judge import (
+    TRUSTED_MATCH_SOURCES,
+    tier_of,
+    # 档位门槛 —— 从**唯一定义处**再导出一次，供明细展示引用。
+    # 展示层不该自己写一份数字，否则改门槛时界面文案会漂。
+    COMMENTS_FOR_TOP,
+    MAGNETS_FOR_TOP,
+    MAGNETS_FOR_HIGH,
+)
+
+# ── 门控加成（主人 2026-09-26）─────────────────────────────────
+#
+# 要求：「热门资源（多磁链 + 评论）的置信度分数提高，冷门资源的压下去
+# 到一键删除门槛以下」。
+#
+# 为什么不能用权重解决：base 是四项**加权和**，任一维度高就能拿分 ——
+# 表达不了「磁力 **且** 评论」这种合取关系。实测过：把评论权重从 0.14
+# 拉到 0.35 反而让评论多的冷门片涨得比磁力高的热门片更多。**算术和天然
+# 表达不了合取。**
+#
+# 做法：加成按**档位**给。档位本身就是那个合取判定（`tier_of`：
+# 极高 = 磁力 > 3 且 评论 > 10；高 = 磁力 > 5），所以
+# 「能不能进一键删」与「分数高不高」用的是**同一套口径**，不会互相打架。
+#
+# 副作用是好的：低档的分数被封在 base 的自然上限内，而进档的都被抬到
+# 高档区间 —— 分数高低从此与门控资格一致。
+GATE_BONUS_EXTREME = 25     # 极高（磁力 > 3 且 评论 > 10）
+GATE_BONUS_HIGH = 12        # 高（磁力 > 5）
 
 # ── base 的四个维度权重（和为 1.0）──────────────────────────────
 #
@@ -258,6 +292,19 @@ def score(correct, comments=None, matches=None, source=None,
 
     base = base_score(correct, comments, matches, source, weights=weights)
 
+    # ── 门控加成（主人 2026-09-26）──
+    #
+    # 加成按**档位**给，而不是按加权和 —— 理由见文件头 `GATE_BONUS_*` 注释。
+    # 判定走 `tier_of`，与删除门控同一真源。
+    gate_tier = tier_of(correct, comments)
+
+    gate_bonus = {
+        "极高": GATE_BONUS_EXTREME,
+        "高": GATE_BONUS_HIGH,
+    }.get(gate_tier, 0)
+
+    base_gated = int(round(_clamp((base + gate_bonus) / 100.0) * 100))
+
     if mismatch:
 
         # ── 主人 2026-09-24 定：超大差距要扣到 0 ──
@@ -267,9 +314,15 @@ def score(correct, comments=None, matches=None, source=None,
         # 而走到这里时证据已经不止一个：每文件比例的中位数极低
         # **且**求和比排除了分片。再兜底就等于把真问题藏起来 ——
         # FH-27 正是这么拿到 0.15 兜底、显示约 12 分而不是 0 的。
+        #
+        # 加成也不给：判成「不是同一部片」的档案谈不上热门，
+        # 给分只会让用户以为它还值得留。
         return {
             "score": 0,
             "base": base,
+            "base_gated": base_gated,
+            "gate_tier": gate_tier,
+            "gate_bonus": gate_bonus,
             "consistency": 0.0,
             "duration_known": True,
             "mismatch": True,
@@ -279,8 +332,11 @@ def score(correct, comments=None, matches=None, source=None,
 
     if cons is None:
         return {
-            "score": base,
+            "score": base_gated,
             "base": base,
+            "base_gated": base_gated,
+            "gate_tier": gate_tier,
+            "gate_bonus": gate_bonus,
             "consistency": CONSISTENCY_UNKNOWN,
             "duration_known": False,
             "mismatch": False,
@@ -289,8 +345,11 @@ def score(correct, comments=None, matches=None, source=None,
     cons = max(CONSISTENCY_FLOOR, _clamp(cons))
 
     return {
-        "score": int(round(base * cons)),
+        "score": int(round(base_gated * cons)),
         "base": base,
+        "base_gated": base_gated,
+        "gate_tier": gate_tier,
+        "gate_bonus": gate_bonus,
         "consistency": cons,
         "duration_known": True,
         "mismatch": False,

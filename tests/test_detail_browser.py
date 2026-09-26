@@ -8,29 +8,52 @@
   - 卡片四个按钮齐、且删除按钮的门控与后端结论一致
 """
 
+import os
 import sqlite3
 
 import pytest
 
 
 def _pick_title(db_path):
-    """挑一个封面和截图都齐的番号；没有就退而求其次。"""
+    """挑一个封面和截图都齐的番号；没有就退而求其次。
 
-    con = sqlite3.connect(db_path)
+    ⚠️ 公开克隆里没有语料（`storage/` 是 gitignored），这里必须能干净跳过。
+
+    两个坑：
+      * `sqlite3.connect(路径)` 在文件**不存在时会创建** 0 字节文件 ——
+        于是「文件在但表不在」，下一句 `SELECT` 直接 `no such table`。
+        改用只读 URI 连接，不存在的路径不会被创建。
+      * 判据是「**这份语料在**」（有 `titles` 表），不是「文件存在」。
+    """
+
+    if not os.path.exists(db_path):
+
+        pytest.skip("没有本地语料库，跳过")
+
+    con = sqlite3.connect("file:{}?mode=ro".format(db_path), uri=True)
     con.row_factory = sqlite3.Row
 
-    rows = con.execute(
-        """
-        SELECT t.number, m.cover_local, m.screenshots
-        FROM titles AS t
-        JOIN metadata AS m ON m.title_id = t.id
-        WHERE m.cover_local IS NOT NULL AND m.cover_local != ''
-          AND m.screenshots IS NOT NULL AND m.screenshots != ''
-        LIMIT 5
-        """
-    ).fetchall()
+    try:
 
-    con.close()
+        rows = con.execute(
+            """
+            SELECT t.number, m.cover_local, m.screenshots
+            FROM titles AS t
+            JOIN metadata AS m ON m.title_id = t.id
+            WHERE m.cover_local IS NOT NULL AND m.cover_local != ''
+              AND m.screenshots IS NOT NULL AND m.screenshots != ''
+            LIMIT 5
+            """
+        ).fetchall()
+
+    except sqlite3.OperationalError:
+
+        # 表都没有 = 这不是一份语料（空库 / 别的什么东西）
+        pytest.skip("本地库没有 titles 表，不是可用语料，跳过")
+
+    finally:
+
+        con.close()
 
     if not rows:
         pytest.skip("库里没有同时带封面和截图的番号，跳过")
